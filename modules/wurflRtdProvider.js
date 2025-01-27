@@ -76,6 +76,7 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
           logger.logError('invalid WURFL.js for Prebid response');
         } else {
           enrichBidderRequests(reqBidsConfigObj, bidders, res);
+          logger.logWarn(reqBidsConfigObj);
         }
         callback();
       });
@@ -174,6 +175,9 @@ export const enrichBidderRequest = (reqBidsConfigObj, bidderCode, wurflData) => 
   };
 
   const device = reqBidsConfigObj.ortb2Fragments.global.device;
+  device.make = wurflData.brand_name;
+  device.model = wurflData.model_name;
+  device.ext['wurfl'] = { 'wurfl_id': wurflData.wurfl_id };
   enrichOrtb2DeviceData('make', wurflData.brand_name, device, ortb2data);
   enrichOrtb2DeviceData('model', wurflData.model_name, device, ortb2data);
   if (wurflData.enrich_device) {

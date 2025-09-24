@@ -225,8 +225,9 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, _) => {
   if (cachedWurflData) {
     logger.logMessage('using cached WURFL.js data');
     const wjsDevice = WurflJSDevice.fromCache(cachedWurflData);
-    const fpdDevice = wjsDevice.FPD();
-    enrichDeviceFPD(reqBidsConfigObj, fpdDevice);
+    if (!wjsDevice._isOverQuota()) {
+      enrichDeviceFPD(reqBidsConfigObj, wjsDevice.FPD());
+    }
     enrichDeviceBidder(reqBidsConfigObj, bidders, wjsDevice);
     callback();
     return;
@@ -339,6 +340,16 @@ const WurflJSDevice = {
     return this._filterCaps(bidderCaps);
   },
 
+  // Private method - checks if bidder has permissions
+  _hasPermission(bidderCode) {
+    return !!(this._pbjsData.permissions && bidderCode in this._pbjsData.permissions);
+  },
+
+  // Private method - checks if over quota
+  _isOverQuota() {
+    return this._pbjsData.over_quota === 1;
+  },
+
   // Private method - returns the ortb2 device type based on WURFL data
   _makeOrtb2DeviceType(wurflData) {
     if (wurflData.is_mobile) {
@@ -398,9 +409,18 @@ const WurflJSDevice = {
 
   // Public API - returns device with bidder-specific ext data
   Bidder(bidderCode) {
-    const fpdDevice = this.FPD();
+    if (!this._hasPermission(bidderCode)) {
+      return {};
+    }
 
-    if (!this._pbjsData.permissions || !this._pbjsData.caps) {
+    // Start with empty device, populate only if publisher is over quota
+    // When over quota, we send device data to each authorized bidder individually
+    let fpdDevice = {};
+    if (this._isOverQuota()) {
+      fpdDevice = this.FPD();
+    }
+
+    if (!this._pbjsData.caps) {
       return { device: fpdDevice };
     }
 

@@ -244,19 +244,9 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, _) => {
     return;
   }
 
-  // Priority 2: Check if LCE data is cached, otherwise generate fresh
-  const cachedLceData = getObjectFromStorage(WURFL_LCE_STORAGE_KEY);
-  let lceData;
-
-  if (cachedLceData) {
-    logger.logMessage('using cached LCE data');
-    lceData = cachedLceData;
-  } else {
-    logger.logMessage('generating fresh LCE data');
-    lceData = WurflLCE.ORTB2Device();
-    setObjectToStorage(WURFL_LCE_STORAGE_KEY, lceData);
-  }
-
+  // Priority 2: return LCE data
+  logger.logMessage('generating fresh LCE data');
+  const lceData = WurflLCE.ORTB2Device();
   enrichDeviceFPD(reqBidsConfigObj, lceData);
 
   // Load WURFL.js async for future requests

@@ -21,7 +21,6 @@ const STATS_ENDPOINT_PATH = '/v1/prebid/stats';
 
 // Storage keys for localStorage caching
 const WURFL_WJS_STORAGE_KEY = 'wurfl-wjs';
-const WURFL_LCE_STORAGE_KEY = 'wurfl-lce';
 
 // OpenRTB 2.0 device type constants
 // Based on OpenRTB 2.6 specification
@@ -129,31 +128,15 @@ function enrichDeviceFPD(reqBidsConfigObj, deviceData) {
  * enrichDeviceBidder enriches bidder-specific device data with WURFL data
  * @param {Object} reqBidsConfigObj Bid request configuration object
  * @param {Set} bidders Set of bidder codes
- * @param {Object} wjsData WURFL.js data with permissions and caps
+ * @param {WurflJSDevice} wjsDevice WURFL.js device data with permissions and caps
  */
-function enrichDeviceBidder(reqBidsConfigObj, bidders, wjsData) {
-  const authBidders = wjsData.permissions ?? {};
-  const cap_names = wjsData.caps?.name ?? {};
-  const cap_values = wjsData.caps?.value ?? {};
-
+function enrichDeviceBidder(reqBidsConfigObj, bidders, wjsDevice) {
   bidders.forEach((bidderCode) => {
-    if (!(bidderCode in authBidders)) {
-      return;
-    }
-
-    // inject WURFL data
+    // keep track of enriched bidders
     enrichedBidders.add(bidderCode);
-    const bidderCaps = getBidderCaps(authBidders[bidderCode], cap_names, cap_values);
-
-    const ortb2data = {
-      'device': {
-        'ext': {
-          'wurfl': bidderCaps
-        },
-      },
-    };
-
-    mergeDeep(reqBidsConfigObj.ortb2Fragments.bidder, { [bidderCode]: ortb2data });
+    // inject WURFL data
+    const bidderDevice = wjsDevice.Bidder(bidderCode);
+    mergeDeep(reqBidsConfigObj.ortb2Fragments.bidder, { [bidderCode]: bidderDevice });
   });
 }
 
@@ -192,10 +175,13 @@ function loadWurflJsAsync(config, bidders) {
       window.WURFLPromises.complete.then((res) => {
         logger.logMessage('async WURFL.js data received', res);
         if (res.wurfl_pbjs) {
-          // TODO create object to cache only relevant data
-          // Store WURFL data to localStorage for future requests
-          setObjectToStorage(WURFL_WJS_STORAGE_KEY, res.WURFL);
-          logger.logMessage('WURFL.js data cached to localStorage');
+          // Create optimized cache object with only relevant device data
+          const cacheData = {
+            WURFL: res.WURFL,
+            wurfl_pbjs: res.wurfl_pbjs,
+          };
+          setObjectToStorage(WURFL_WJS_STORAGE_KEY, cacheData);
+          logger.logMessage('WURFL.js device cache stored to localStorage');
         } else {
           logger.logError('invalid async WURFL.js for Prebid response');
         }
@@ -238,41 +224,24 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, _) => {
   const cachedWurflData = getObjectFromStorage(WURFL_WJS_STORAGE_KEY);
   if (cachedWurflData) {
     logger.logMessage('using cached WURFL.js data');
-    enrichDeviceFPD(reqBidsConfigObj, cachedWurflData.device);
-    enrichDeviceBidder(reqBidsConfigObj, bidders, cachedWurflData);
+    const wjsDevice = WurflJSDevice.fromCache(cachedWurflData);
+    const fpdDevice = wjsDevice.FPD();
+    enrichDeviceFPD(reqBidsConfigObj, fpdDevice);
+    enrichDeviceBidder(reqBidsConfigObj, bidders, wjsDevice);
     callback();
     return;
   }
 
   // Priority 2: return LCE data
   logger.logMessage('generating fresh LCE data');
-  const lceData = WurflLCE.ORTB2Device();
-  enrichDeviceFPD(reqBidsConfigObj, lceData);
+  const fpdDevice = WurflLCEDevice.FPD();
+  enrichDeviceFPD(reqBidsConfigObj, fpdDevice);
 
   // Load WURFL.js async for future requests
   loadWurflJsAsync(config, bidders);
 
   callback();
 }
-
-/**
- * getBidderCaps returns the WURFL capabilities for a bidder
- * @param {Array} filter Filter list of capability indices for the bidder
- * @param {Array} cap_names Capability names array
- * @param {Array} cap_values Capability values array
- * @returns {Object} Bidder capabilities data
- */
-export const getBidderCaps = (filter, cap_names, cap_values) => {
-  const data = {};
-  cap_names.forEach((name, index) => {
-    if (!filter.includes(index)) {
-      return;
-    }
-    data[name] = cap_values[index];
-  });
-  return data;
-}
-
 
 /**
  * onAuctionEndEvent is called when the auction ends
@@ -295,8 +264,169 @@ export const wurflSubmodule = {
 // Register the WURFL submodule as submodule of realTimeData
 submodule(REAL_TIME_MODULE, wurflSubmodule);
 
-// ==================== WURFL LCE MODULE ====================
-const WurflLCE = {
+
+// ==================== WURFL JS DEVICE MODULE ====================
+const WurflJSDevice = {
+  // Private properties
+  _wurflData: null,       // WURFL data containing capability values (from window.WURFL)
+  _pbjsData: null,        // wurfl_pbjs data with caps array and permissions (from response)
+  _basicCaps: null,       // Cached basic capabilities (computed once)
+  _pubCaps: null,         // Cached publisher capabilities (computed once)
+  _device: null,          // Cached device object (computed once)
+
+  // Constructor from WURFL.js local cache
+  fromCache(res) {
+    this._wurflData = res.WURFL || {};
+    this._pbjsData = res.wurfl_pbjs || {};
+    this._basicCaps = null;
+    this._pubCaps = null;
+    this._device = null;
+    return this;
+  },
+
+  // Private method - converts a given value to a number
+  _toNumber(value) {
+    if (value === '' || value === null) {
+      return undefined;
+    }
+    const num = Number(value);
+    return Number.isNaN(num) ? undefined : num;
+  },
+
+  // Private method - filters capabilities based on indices
+  _filterCaps(indexes) {
+    const data = {};
+    const caps = this._pbjsData.caps;          // Array of capability names
+    const wurflData = this._wurflData;         // WURFL data containing capability values
+
+    if (!indexes || !caps || !wurflData) {
+      return data;
+    }
+
+    indexes.forEach((index) => {
+      const capName = caps[index];  // Get capability name by index
+      if (capName && capName in wurflData) {
+        data[capName] = wurflData[capName];  // Get value from WURFL data
+      }
+    });
+
+    return data;
+  },
+
+  // Private method - gets basic capabilities
+  _getBasicCaps() {
+    if (this._basicCaps !== null) {
+      return this._basicCaps;
+    }
+    const basicCaps = this._pbjsData.permissions?.["__basic__"]?.cap_indices || [];
+    this._basicCaps = this._filterCaps(basicCaps);
+    return this._basicCaps;
+  },
+
+  // Private method - gets publisher capabilities
+  _getPubCaps() {
+    if (this._pubCaps !== null) {
+      return this._pubCaps;
+    }
+    const pubCaps = this._pbjsData.permissions?.["__pub__"]?.cap_indices || [];
+    this._pubCaps = this._filterCaps(pubCaps);
+    return this._pubCaps;
+  },
+
+  // Private method - gets bidder-specific capabilities
+  _getBidderCaps(bidderCode) {
+    const bidderCaps = this._pbjsData.permissions?.[bidderCode]?.cap_indices || [];
+    return this._filterCaps(bidderCaps);
+  },
+
+  // Private method - returns the ortb2 device type based on WURFL data
+  _makeOrtb2DeviceType(wurflData) {
+    if (wurflData.is_mobile) {
+      if (!('is_phone' in wurflData) || !('is_tablet' in wurflData)) {
+        return undefined;
+      }
+      if (wurflData.is_phone || wurflData.is_tablet) {
+        return ORTB2_DEVICE_TYPE.MOBILE_OR_TABLET;
+      }
+      return ORTB2_DEVICE_TYPE.CONNECTED_DEVICE;
+    }
+    if (wurflData.is_full_desktop) {
+      return ORTB2_DEVICE_TYPE.PERSONAL_COMPUTER;
+    }
+    if (wurflData.is_connected_tv) {
+      return ORTB2_DEVICE_TYPE.CONNECTED_TV;
+    }
+    if (wurflData.is_phone) {
+      return ORTB2_DEVICE_TYPE.PHONE;
+    }
+    if (wurflData.is_tablet) {
+      return ORTB2_DEVICE_TYPE.TABLET;
+    }
+    if (wurflData.is_ott) {
+      return ORTB2_DEVICE_TYPE.SET_TOP_BOX;
+    }
+    return undefined;
+  },
+
+  // Public API - returns device object for First Party Data (global)
+  FPD() {
+    if (this._device !== null) {
+      return this._device;
+    }
+
+    const wd = this._wurflData;
+    if (!wd) {
+      this._device = {};
+      return this._device;
+    }
+
+    this._device = {
+      make: wd.brand_name,
+      model: wd.model_name,
+      devicetype: this._makeOrtb2DeviceType(wd),
+      os: wd.advertised_device_os,
+      osv: wd.advertised_device_os_version,
+      hwv: wd.model_name,
+      h: wd.resolution_height,
+      w: wd.resolution_width,
+      ppi: wd.pixel_density,
+      pxratio: this._toNumber(wd.density_class),
+      js: this._toNumber(wd.ajax_support_javascript)
+    };
+    return this._device;
+  },
+
+  // Public API - returns device with bidder-specific ext data
+  Bidder(bidderCode) {
+    const fpdDevice = this.FPD();
+
+    if (!this._pbjsData.permissions || !this._pbjsData.caps) {
+      return { device: fpdDevice };
+    }
+
+    // Create union of all capability data (bidder-specific overrides basic and pub)
+    const wurflData = {
+      ...this._getBasicCaps(),
+      ...this._getPubCaps(),
+      ...this._getBidderCaps(bidderCode)
+    };
+
+    return {
+      device: {
+        ...fpdDevice,
+        ext: {
+          wurfl: wurflData
+        }
+      }
+    };
+  }
+};
+// ==================== END WURFL JS DEVICE MODULE ====================
+
+
+
+// ==================== WURFL LCE DEVICE MODULE ====================
+const WurflLCEDevice = {
   // Private mappings for device detection
   _desktopMapping: new Map([
     ["Windows NT", "Windows"],
@@ -522,8 +652,8 @@ const WurflLCE = {
     return '';
   },
 
-  // Public API
-  ORTB2Device() {
+  // Public API - returns device object for First Party Data (global)
+  FPD() {
     const useragent = typeof window !== "undefined" ? window.navigator.userAgent : "";
     const deviceInfo = this._getDeviceInfo(useragent);
 
@@ -549,4 +679,4 @@ const WurflLCE = {
     };
   }
 };
-// ==================== END WURFL LCE MODULE ====================
+// ==================== END WURFL LCE DEVICE MODULE ====================

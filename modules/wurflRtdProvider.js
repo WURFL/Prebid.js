@@ -199,7 +199,7 @@ function loadWurflJsAsync(config, bidders) {
  * @param {Object} config Configuration for WURFL RTD submodule
  * @param {Object} userConsent User consent data
  */
-const init = (_, _) => {
+const init = (config, userConsent) => {
   logger.logMessage('initialized');
   return true;
 }

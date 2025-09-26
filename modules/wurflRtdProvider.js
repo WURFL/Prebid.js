@@ -340,8 +340,8 @@ const WurflJSDevice = {
     return this._filterCaps(bidderCaps);
   },
 
-  // Private method - checks if bidder has permissions
-  _hasPermission(bidderCode) {
+  // Private method - checks if bidder is authorized
+  _isAuthorized(bidderCode) {
     return !!(this._pbjsData.bidders && bidderCode in this._pbjsData.bidders);
   },
 
@@ -409,7 +409,7 @@ const WurflJSDevice = {
 
   // Public API - returns device with bidder-specific ext data
   Bidder(bidderCode) {
-    if (!this._hasPermission(bidderCode)) {
+    if (!this._isAuthorized(bidderCode)) {
       return {};
     }
 

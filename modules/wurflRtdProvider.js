@@ -184,11 +184,14 @@ function loadWurflJsAsync(config, bidders) {
         logger.logMessage('async WURFL.js data received', res);
         if (res.wurfl_pbjs) {
           // Create optimized cache object with only relevant device data
+          const cacheWriteStart = performance.now();
           const cacheData = {
             WURFL: res.WURFL,
             wurfl_pbjs: res.wurfl_pbjs,
           };
           setObjectToStorage(WURFL_WJS_STORAGE_KEY, cacheData);
+          const cacheWriteEnd = performance.now();
+          console.log(`[WURFL] WJS cache write time: ${(cacheWriteEnd - cacheWriteStart).toFixed(2)}ms`);
           logger.logMessage('WURFL.js device cache stored to localStorage');
         } else {
           logger.logError('invalid async WURFL.js for Prebid response');
@@ -229,8 +232,12 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, _) => {
   });
 
   // Priority 1: Check if WURFL.js response is cached
+  const cacheReadStart = performance.now();
   const cachedWurflData = getObjectFromStorage(WURFL_WJS_STORAGE_KEY);
   if (cachedWurflData) {
+    const cacheReadEnd = performance.now();
+    console.log(`[WURFL] WJS cache read time: ${(cacheReadEnd - cacheReadStart).toFixed(2)}ms`);
+
     logger.logMessage('using cached WURFL.js data');
     const wjsDevice = WurflJSDevice.fromCache(cachedWurflData);
     if (!wjsDevice._isOverQuota()) {
@@ -240,10 +247,15 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, _) => {
     callback();
     return;
   }
+  const cacheReadEnd = performance.now();
+  console.log(`[WURFL] WJS cache read time (no cache): ${(cacheReadEnd - cacheReadStart).toFixed(2)}ms`);
 
   // Priority 2: return LCE data
   logger.logMessage('generating fresh LCE data');
+  const lceDetectionStart = performance.now();
   const fpdDevice = WurflLCEDevice.FPD();
+  const lceDetectionEnd = performance.now();
+  console.log(`[WURFL] LCE detection time: ${(lceDetectionEnd - lceDetectionStart).toFixed(2)}ms`);
   enrichDeviceFPD(reqBidsConfigObj, fpdDevice);
 
   // Load WURFL.js async for future requests

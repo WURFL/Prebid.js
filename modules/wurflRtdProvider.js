@@ -319,7 +319,7 @@ const WurflJSDevice = {
     if (this._basicCaps !== null) {
       return this._basicCaps;
     }
-    const basicCaps = this._pbjsData.permissions?.["__basic__"]?.cap_indices || [];
+    const basicCaps = this._pbjsData.global?.basic_set?.cap_indices || [];
     this._basicCaps = this._filterCaps(basicCaps);
     return this._basicCaps;
   },
@@ -329,20 +329,20 @@ const WurflJSDevice = {
     if (this._pubCaps !== null) {
       return this._pubCaps;
     }
-    const pubCaps = this._pbjsData.permissions?.["__pub__"]?.cap_indices || [];
+    const pubCaps = this._pbjsData.global?.publisher?.cap_indices || [];
     this._pubCaps = this._filterCaps(pubCaps);
     return this._pubCaps;
   },
 
   // Private method - gets bidder-specific capabilities
   _getBidderCaps(bidderCode) {
-    const bidderCaps = this._pbjsData.permissions?.[bidderCode]?.cap_indices || [];
+    const bidderCaps = this._pbjsData.bidders?.[bidderCode]?.cap_indices || [];
     return this._filterCaps(bidderCaps);
   },
 
   // Private method - checks if bidder has permissions
   _hasPermission(bidderCode) {
-    return !!(this._pbjsData.permissions && bidderCode in this._pbjsData.permissions);
+    return !!(this._pbjsData.bidders && bidderCode in this._pbjsData.bidders);
   },
 
   // Private method - checks if over quota

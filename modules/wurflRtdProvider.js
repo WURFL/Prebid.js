@@ -53,6 +53,91 @@ export const storage = getStorageManager({
 // injected with WURFL data
 const enrichedBidders = new Set();
 
+// WURFLDebugger object literal with timing methods for easy removal
+const WURFLDebugger = {
+  // Initialize WURFL debug tracking object
+  init() {
+    if (typeof window !== 'undefined') {
+      window.WURFLDebug = {
+        // Data source for current auction
+        dataSource: 'unknown', // 'cache' | 'lce'
+
+        // Simple timing measurements
+        cacheReadTime: null,    // Single cache read time (hit or miss)
+        lceDetectionTime: null, // LCE detection time (only if dataSource = 'lce')
+        cacheWriteTime: null,   // Async cache write time (for future auctions)
+
+        // The actual data used in current auction
+        data: {
+          // When dataSource = 'cache' (Priority 1)
+          wurflData: null,      // The cached WURFL device data
+          pbjsData: null,       // The cached wurfl_pbjs data
+
+          // When dataSource = 'lce' (Priority 2)
+          lceDevice: null       // The LCE-generated device object
+        }
+      };
+    }
+  },
+  // Private timing start values
+  _cacheReadStart: null,
+  _lceDetectionStart: null,
+  _cacheWriteStart: null,
+
+  // Cache read timing methods
+  cacheReadStart() {
+    this._cacheReadStart = performance.now();
+  },
+
+  cacheReadStop() {
+    if (this._cacheReadStart === null) return;
+    const duration = performance.now() - this._cacheReadStart;
+    window.WURFLDebug.cacheReadTime = duration;
+    console.log(`[WURFL] WJS cache read time: ${duration.toFixed(2)}ms`);
+    this._cacheReadStart = null;
+  },
+
+  // LCE detection timing methods
+  lceDetectionStart() {
+    this._lceDetectionStart = performance.now();
+  },
+
+  lceDetectionStop() {
+    if (this._lceDetectionStart === null) return;
+    const duration = performance.now() - this._lceDetectionStart;
+    window.WURFLDebug.lceDetectionTime = duration;
+    console.log(`[WURFL] LCE detection time: ${duration.toFixed(2)}ms`);
+    this._lceDetectionStart = null;
+  },
+
+  // Cache write timing methods
+  cacheWriteStart() {
+    this._cacheWriteStart = performance.now();
+  },
+
+  cacheWriteStop() {
+    if (this._cacheWriteStart === null) return;
+    const duration = performance.now() - this._cacheWriteStart;
+    window.WURFLDebug.cacheWriteTime = duration;
+    console.log(`[WURFL] WJS cache write time: ${duration.toFixed(2)}ms`);
+    this._cacheWriteStart = null;
+  },
+
+  // Data tracking methods
+  setDataSource(source) {
+    window.WURFLDebug.dataSource = source;
+  },
+
+  setCacheData(wurflData, pbjsData) {
+    window.WURFLDebug.data.wurflData = wurflData;
+    window.WURFLDebug.data.pbjsData = pbjsData;
+  },
+
+  setLceData(lceDevice) {
+    window.WURFLDebug.data.lceDevice = lceDevice;
+  }
+};
+
 /**
  * Safely gets an object from localStorage with JSON parsing
  * @param {string} key The storage key
@@ -184,14 +269,13 @@ function loadWurflJsAsync(config, bidders) {
         logger.logMessage('async WURFL.js data received', res);
         if (res.wurfl_pbjs) {
           // Create optimized cache object with only relevant device data
-          const cacheWriteStart = performance.now();
+          WURFLDebugger.cacheWriteStart();
           const cacheData = {
             WURFL: res.WURFL,
             wurfl_pbjs: res.wurfl_pbjs,
           };
           setObjectToStorage(WURFL_WJS_STORAGE_KEY, cacheData);
-          const cacheWriteEnd = performance.now();
-          console.log(`[WURFL] WJS cache write time: ${(cacheWriteEnd - cacheWriteStart).toFixed(2)}ms`);
+          WURFLDebugger.cacheWriteStop();
           logger.logMessage('WURFL.js device cache stored to localStorage');
         } else {
           logger.logError('invalid async WURFL.js for Prebid response');
@@ -211,6 +295,7 @@ function loadWurflJsAsync(config, bidders) {
  * @param {Object} userConsent User consent data
  */
 const init = (config, userConsent) => {
+  WURFLDebugger.init();
   logger.logMessage('initialized');
   return true;
 }
@@ -232,11 +317,13 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, _) => {
   });
 
   // Priority 1: Check if WURFL.js response is cached
-  const cacheReadStart = performance.now();
+  WURFLDebugger.cacheReadStart();
   const cachedWurflData = getObjectFromStorage(WURFL_WJS_STORAGE_KEY);
+  WURFLDebugger.cacheReadStop();
+
   if (cachedWurflData) {
-    const cacheReadEnd = performance.now();
-    console.log(`[WURFL] WJS cache read time: ${(cacheReadEnd - cacheReadStart).toFixed(2)}ms`);
+    WURFLDebugger.setDataSource('cache');
+    WURFLDebugger.setCacheData(cachedWurflData.WURFL, cachedWurflData.wurfl_pbjs);
 
     logger.logMessage('using cached WURFL.js data');
     const wjsDevice = WurflJSDevice.fromCache(cachedWurflData);
@@ -247,15 +334,14 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, _) => {
     callback();
     return;
   }
-  const cacheReadEnd = performance.now();
-  console.log(`[WURFL] WJS cache read time (no cache): ${(cacheReadEnd - cacheReadStart).toFixed(2)}ms`);
 
   // Priority 2: return LCE data
   logger.logMessage('generating fresh LCE data');
-  const lceDetectionStart = performance.now();
+  WURFLDebugger.setDataSource('lce');
+  WURFLDebugger.lceDetectionStart();
   const fpdDevice = WurflLCEDevice.FPD();
-  const lceDetectionEnd = performance.now();
-  console.log(`[WURFL] LCE detection time: ${(lceDetectionEnd - lceDetectionStart).toFixed(2)}ms`);
+  WURFLDebugger.lceDetectionStop();
+  WURFLDebugger.setLceData(fpdDevice);
   enrichDeviceFPD(reqBidsConfigObj, fpdDevice);
 
   // Load WURFL.js async for future requests

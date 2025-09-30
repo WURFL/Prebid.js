@@ -1,10 +1,6 @@
 import {
-  bidderData,
-  enrichBidderRequest,
-  lowEntropyData,
   wurflSubmodule,
-  makeOrtb2DeviceType,
-  toNumber,
+  storage
 } from 'modules/wurflRtdProvider';
 import * as ajaxModule from 'src/ajax';
 import { loadExternalScriptStub } from 'test/mocks/adloaderStub.js';
@@ -14,11 +10,23 @@ describe('wurflRtdProvider', function () {
     const altHost = 'http://example.local/wurfl.js';
 
     const wurfl_pbjs = {
-      low_entropy_caps: ['is_mobile', 'complete_device_name', 'form_factor'],
-      caps: ['advertised_browser', 'advertised_browser_version', 'advertised_device_os', 'advertised_device_os_version', 'ajax_support_javascript', 'brand_name', 'complete_device_name', 'density_class', 'form_factor', 'is_android', 'is_app_webview', 'is_connected_tv', 'is_full_desktop', 'is_ios', 'is_mobile', 'is_ott', 'is_phone', 'is_robot', 'is_smartphone', 'is_smarttv', 'is_tablet', 'manufacturer_name', 'marketing_name', 'max_image_height', 'max_image_width', 'model_name', 'physical_screen_height', 'physical_screen_width', 'pixel_density', 'pointing_method', 'resolution_height', 'resolution_width'],
-      authorized_bidders: {
-        bidder1: [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
-        bidder2: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 20, 21, 25, 28, 30, 31]
+      caps: ['wurfl_id', 'advertised_browser', 'advertised_browser_version', 'advertised_device_os', 'advertised_device_os_version', 'ajax_support_javascript', 'brand_name', 'complete_device_name', 'density_class', 'form_factor', 'is_android', 'is_app_webview', 'is_connected_tv', 'is_full_desktop', 'is_ios', 'is_mobile', 'is_ott', 'is_phone', 'is_robot', 'is_smartphone', 'is_smarttv', 'is_tablet', 'manufacturer_name', 'marketing_name', 'max_image_height', 'max_image_width', 'model_name', 'physical_screen_height', 'physical_screen_width', 'pixel_density', 'pointing_method', 'resolution_height', 'resolution_width'],
+      over_quota: 0,
+      global: {
+        basic_set: {
+          cap_indices: [0, 9, 15, 16, 17, 18, 32]
+        },
+        publisher: {
+          cap_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+        }
+      },
+      bidders: {
+        bidder1: {
+          cap_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
+        },
+        bidder2: {
+          cap_indices: [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 21, 22, 26, 29, 31, 32]
+        }
       }
     }
     const WURFL = {
@@ -98,123 +106,73 @@ describe('wurflRtdProvider', function () {
       expect(wurflSubmodule.init()).to.be.true;
     });
 
-    it('should enrich the bid request data', (done) => {
-      const expectedURL = new URL(altHost);
-      expectedURL.searchParams.set('debug', true);
-      expectedURL.searchParams.set('mode', 'prebid');
-      expectedURL.searchParams.set('wurfl_id', true);
+    it('should enrich multiple bidders with cached WURFL data (not over quota)', (done) => {
+      // Reset reqBidsConfigObj to clean state
+      reqBidsConfigObj.ortb2Fragments.global.device = {};
+      reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+      // Setup localStorage with cached WURFL data
+      const cachedData = { WURFL, wurfl_pbjs };
+      sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+      sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+      sandbox.stub(storage, 'hasLocalStorage').returns(true);
 
       const callback = () => {
-        const v = {
-          bidder1: {
-            device: {
-              make: 'Google',
-              model: 'Nexus 5',
-              devicetype: 1,
-              os: 'Android',
-              osv: '6.0',
-              hwv: 'Nexus 5',
-              h: 1920,
-              w: 1080,
-              ppi: 443,
-              pxratio: 3.0,
-              js: 1,
-              ext: {
-                wurfl: {
-                  advertised_browser: 'Chrome Mobile',
-                  advertised_browser_version: '130.0.0.0',
-                  advertised_device_os: 'Android',
-                  advertised_device_os_version: '6.0',
-                  ajax_support_javascript: !0,
-                  brand_name: 'Google',
-                  complete_device_name: 'Google Nexus 5',
-                  density_class: '3.0',
-                  form_factor: 'Feature Phone',
-                  is_app_webview: !1,
-                  is_connected_tv: !1,
-                  is_full_desktop: !1,
-                  is_mobile: !0,
-                  is_ott: !1,
-                  is_phone: !0,
-                  is_robot: !1,
-                  is_smartphone: !1,
-                  is_smarttv: !1,
-                  is_tablet: !1,
-                  manufacturer_name: 'LG',
-                  marketing_name: '',
-                  max_image_height: 640,
-                  max_image_width: 360,
-                  model_name: 'Nexus 5',
-                  physical_screen_height: 110,
-                  physical_screen_width: 62,
-                  pixel_density: 443,
-                  pointing_method: 'touchscreen',
-                  resolution_height: 1920,
-                  resolution_width: 1080,
-                  wurfl_id: 'lg_nexus5_ver1',
-                },
-              },
-            },
-          },
-          bidder2: {
-            device: {
-              make: 'Google',
-              model: 'Nexus 5',
-              devicetype: 1,
-              os: 'Android',
-              osv: '6.0',
-              hwv: 'Nexus 5',
-              h: 1920,
-              w: 1080,
-              ppi: 443,
-              pxratio: 3.0,
-              js: 1,
-              ext: {
-                wurfl: {
-                  advertised_device_os: 'Android',
-                  advertised_device_os_version: '6.0',
-                  ajax_support_javascript: !0,
-                  brand_name: 'Google',
-                  complete_device_name: 'Google Nexus 5',
-                  density_class: '3.0',
-                  form_factor: 'Feature Phone',
-                  is_android: !0,
-                  is_app_webview: !1,
-                  is_connected_tv: !1,
-                  is_full_desktop: !1,
-                  is_ios: !1,
-                  is_mobile: !0,
-                  is_ott: !1,
-                  is_phone: !0,
-                  is_tablet: !1,
-                  manufacturer_name: 'LG',
-                  model_name: 'Nexus 5',
-                  pixel_density: 443,
-                  resolution_height: 1920,
-                  resolution_width: 1080,
-                  wurfl_id: 'lg_nexus5_ver1',
-                },
-              },
-            },
-          },
-          bidder3: {
-            device: {
-              make: 'Google',
-              model: 'Nexus 5',
-              ext: {
-                wurfl: {
-                  complete_device_name: 'Google Nexus 5',
-                  form_factor: 'Feature Phone',
-                  is_mobile: !0,
-                  model_name: 'Nexus 5',
-                  brand_name: 'Google',
-                  wurfl_id: 'lg_nexus5_ver1',
-                },
-              },
-            },
-          },
-        };
-        expect(reqBidsConfigObj.ortb2Fragments.bidder).to.deep.equal(v);
+        // Verify global FPD has device data (not over quota)
+        expect(reqBidsConfigObj.ortb2Fragments.global.device).to.deep.include({
+          make: 'Google',
+          model: 'Nexus 5',
+          devicetype: 1,
+          os: 'Android',
+          osv: '6.0',
+          hwv: 'Nexus 5',
+          h: 1920,
+          w: 1080,
+          ppi: 443,
+          pxratio: 3.0,
+          js: 1
+        });
+
+        // bidder1 and bidder2 are authorized, should get ext.wurfl with all capabilities
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder1.device.ext.wurfl).to.deep.equal(WURFL);
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder2.device.ext.wurfl).to.deep.equal(WURFL);
+
+        // bidder3 is NOT authorized, should get empty object
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder3).to.be.undefined;
+
+        done();
+      };
+
+      const config = { params: {} };
+      const userConsent = {};
+
+      wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, userConsent);
+    });
+
+    it('should use LCE data when cache is empty and load WURFL.js async', (done) => {
+      // Reset reqBidsConfigObj to clean state
+      reqBidsConfigObj.ortb2Fragments.global.device = {};
+      reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+      // Setup empty cache
+      sandbox.stub(storage, 'getDataFromLocalStorage').returns(null);
+      sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+      sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+      const expectedURL = new URL(altHost);
+      expectedURL.searchParams.set('debug', 'true');
+      expectedURL.searchParams.set('mode', 'prebid');
+      expectedURL.searchParams.set('wurfl_id', 'true');
+      expectedURL.searchParams.set('bidders', 'bidder1,bidder2,bidder3');
+
+      const callback = () => {
+        // Verify global FPD has LCE device data
+        expect(reqBidsConfigObj.ortb2Fragments.global.device).to.exist;
+        expect(reqBidsConfigObj.ortb2Fragments.global.device.js).to.equal(1);
+
+        // No bidder enrichment should occur without cached WURFL data
+        expect(reqBidsConfigObj.ortb2Fragments.bidder).to.deep.equal({});
+
         done();
       };
 
@@ -227,263 +185,149 @@ describe('wurflRtdProvider', function () {
       const userConsent = {};
 
       wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, userConsent);
+
+      // Verify WURFL.js is loaded async for future requests
       expect(loadExternalScriptStub.calledOnce).to.be.true;
       const loadExternalScriptCall = loadExternalScriptStub.getCall(0);
       expect(loadExternalScriptCall.args[0]).to.equal(expectedURL.toString());
       expect(loadExternalScriptCall.args[2]).to.equal('wurfl');
     });
 
-    it('onAuctionEndEvent: should send analytics data using navigator.sendBeacon, if available', () => {
-      const auctionDetails = {};
-      const config = {};
+    it('should enrich only bidders when over quota', (done) => {
+      // Reset reqBidsConfigObj to clean state
+      reqBidsConfigObj.ortb2Fragments.global.device = {};
+      reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+      // Setup localStorage with cached WURFL data (over quota)
+      const wurfl_pbjs_over_quota = {
+        ...wurfl_pbjs,
+        over_quota: 1
+      };
+      const cachedData = { WURFL, wurfl_pbjs: wurfl_pbjs_over_quota };
+      sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+      sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+      sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+      const callback = () => {
+        // Verify global FPD does NOT have device data (over quota)
+        expect(reqBidsConfigObj.ortb2Fragments.global.device).to.deep.equal({});
+
+        // bidder1 and bidder2 are authorized, should get full device + ext.wurfl
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder1.device).to.deep.include({
+          make: 'Google',
+          model: 'Nexus 5',
+          devicetype: 1,
+          os: 'Android',
+          osv: '6.0',
+          hwv: 'Nexus 5',
+          h: 1920,
+          w: 1080,
+          ppi: 443,
+          pxratio: 3.0,
+          js: 1
+        });
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder1.device.ext.wurfl).to.deep.equal(WURFL);
+
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder2.device).to.deep.include({
+          make: 'Google',
+          model: 'Nexus 5',
+          devicetype: 1,
+          os: 'Android',
+          osv: '6.0',
+          hwv: 'Nexus 5',
+          h: 1920,
+          w: 1080,
+          ppi: 443,
+          pxratio: 3.0,
+          js: 1
+        });
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder2.device.ext.wurfl).to.deep.equal(WURFL);
+
+        // bidder3 is NOT authorized, should get nothing
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder3).to.be.undefined;
+
+        done();
+      };
+
+      const config = { params: {} };
       const userConsent = {};
+
+      wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, userConsent);
+    });
+
+    it('onAuctionEndEvent: should send analytics data using navigator.sendBeacon, if available', (done) => {
+      // Reset reqBidsConfigObj to clean state
+      reqBidsConfigObj.ortb2Fragments.global.device = {};
+      reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+      // Setup localStorage with cached WURFL data to populate enrichedBidders
+      const cachedData = { WURFL, wurfl_pbjs };
+      sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+      sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+      sandbox.stub(storage, 'hasLocalStorage').returns(true);
 
       const sendBeaconStub = sandbox.stub(navigator, 'sendBeacon');
 
-      // Call the function
-      wurflSubmodule.onAuctionEndEvent(auctionDetails, config, userConsent);
+      const callback = () => {
+        // Now call onAuctionEndEvent with enriched bidders
+        const auctionDetails = {};
+        const config = {};
+        const userConsent = {};
 
-      // Assertions
-      expect(sendBeaconStub.calledOnce).to.be.true;
-      expect(sendBeaconStub.calledWithExactly(expectedStatsURL, expectedData)).to.be.true;
-    });
+        wurflSubmodule.onAuctionEndEvent(auctionDetails, config, userConsent);
 
-    it('onAuctionEndEvent: should send analytics data using fetch as fallback, if navigator.sendBeacon is not available', () => {
-      const auctionDetails = {};
-      const config = {};
+        // Assertions
+        expect(sendBeaconStub.calledOnce).to.be.true;
+        expect(sendBeaconStub.calledWithExactly(expectedStatsURL, expectedData)).to.be.true;
+        done();
+      };
+
+      const config = { params: {} };
       const userConsent = {};
 
-      const sendBeaconStub = sandbox.stub(navigator, 'sendBeacon').value(undefined);
-      const windowFetchStub = sandbox.stub(window, 'fetch');
+      // First enrich bidders to populate enrichedBidders Set
+      wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, userConsent);
+    });
+
+    it('onAuctionEndEvent: should send analytics data using fetch as fallback, if navigator.sendBeacon is not available', (done) => {
+      // Reset reqBidsConfigObj to clean state
+      reqBidsConfigObj.ortb2Fragments.global.device = {};
+      reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+      // Setup localStorage with cached WURFL data to populate enrichedBidders
+      const cachedData = { WURFL, wurfl_pbjs };
+      sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+      sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+      sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+      const sendBeaconStub = sandbox.stub(ajaxModule, 'sendBeacon').returns(false);
       const fetchAjaxStub = sandbox.stub(ajaxModule, 'fetch');
 
-      // Call the function
-      wurflSubmodule.onAuctionEndEvent(auctionDetails, config, userConsent);
+      const callback = () => {
+        // Now call onAuctionEndEvent with enriched bidders
+        const auctionDetails = {};
+        const config = {};
+        const userConsent = {};
 
-      // Assertions
-      expect(sendBeaconStub.called).to.be.false;
+        wurflSubmodule.onAuctionEndEvent(auctionDetails, config, userConsent);
 
-      expect(fetchAjaxStub.calledOnce).to.be.true;
-      const fetchAjaxCall = fetchAjaxStub.getCall(0);
-      expect(fetchAjaxCall.args[0]).to.equal(expectedStatsURL);
-      expect(fetchAjaxCall.args[1].method).to.equal('POST');
-      expect(fetchAjaxCall.args[1].body).to.equal(expectedData);
-      expect(fetchAjaxCall.args[1].mode).to.equal('no-cors');
-    });
-  });
+        // Assertions
+        expect(sendBeaconStub.calledOnce).to.be.true;
 
-  describe('bidderData', () => {
-    it('should return the WURFL data for a bidder', () => {
-      const wjsData = {
-        capability1: 'value1',
-        capability2: 'value2',
-        capability3: 'value3',
-      };
-      const caps = ['capability1', 'capability2', 'capability3'];
-      const filter = [0, 2];
-
-      const result = bidderData(wjsData, caps, filter);
-
-      expect(result).to.deep.equal({
-        capability1: 'value1',
-        capability3: 'value3',
-      });
-    });
-
-    it('should return an empty object if the filter is empty', () => {
-      const wjsData = {
-        capability1: 'value1',
-        capability2: 'value2',
-        capability3: 'value3',
-      };
-      const caps = ['capability1', 'capability3'];
-      const filter = [];
-
-      const result = bidderData(wjsData, caps, filter);
-
-      expect(result).to.deep.equal({});
-    });
-  });
-
-  describe('lowEntropyData', () => {
-    it('should return the correct low entropy data for Apple devices', () => {
-      const wjsData = {
-        complete_device_name: 'Apple iPhone X',
-        form_factor: 'Smartphone',
-        is_mobile: !0,
-        brand_name: 'Apple',
-        model_name: 'iPhone X',
-      };
-      const lowEntropyCaps = ['complete_device_name', 'form_factor', 'is_mobile'];
-      const expectedData = {
-        complete_device_name: 'Apple iPhone',
-        form_factor: 'Smartphone',
-        is_mobile: !0,
-        brand_name: 'Apple',
-        model_name: 'iPhone',
-      };
-      const result = lowEntropyData(wjsData, lowEntropyCaps);
-      expect(result).to.deep.equal(expectedData);
-    });
-
-    it('should return the correct low entropy data for Android devices', () => {
-      const wjsData = {
-        complete_device_name: 'Samsung SM-G981B (Galaxy S20 5G)',
-        form_factor: 'Smartphone',
-        is_mobile: !0,
-      };
-      const lowEntropyCaps = ['complete_device_name', 'form_factor', 'is_mobile'];
-      const expectedData = {
-        complete_device_name: 'Samsung SM-G981B (Galaxy S20 5G)',
-        form_factor: 'Smartphone',
-        is_mobile: !0,
-      };
-      const result = lowEntropyData(wjsData, lowEntropyCaps);
-      expect(result).to.deep.equal(expectedData);
-    });
-
-    it('should return an empty object if the lowEntropyCaps array is empty', () => {
-      const wjsData = {
-        complete_device_name: 'Samsung SM-G981B (Galaxy S20 5G)',
-        form_factor: 'Smartphone',
-        is_mobile: !0,
-      };
-      const lowEntropyCaps = [];
-      const expectedData = {};
-      const result = lowEntropyData(wjsData, lowEntropyCaps);
-      expect(result).to.deep.equal(expectedData);
-    });
-  });
-
-  describe('enrichBidderRequest', () => {
-    it('should enrich the bidder request with WURFL data', () => {
-      const reqBidsConfigObj = {
-        ortb2Fragments: {
-          global: {
-            device: {},
-          },
-          bidder: {
-            exampleBidder: {
-              device: {
-                ua: 'user-agent',
-              }
-            }
-          }
-        }
-      };
-      const bidderCode = 'exampleBidder';
-      const wjsData = {
-        capability1: 'value1',
-        capability2: 'value2'
+        expect(fetchAjaxStub.calledOnce).to.be.true;
+        const fetchAjaxCall = fetchAjaxStub.getCall(0);
+        expect(fetchAjaxCall.args[0]).to.equal(expectedStatsURL);
+        expect(fetchAjaxCall.args[1].method).to.equal('POST');
+        expect(fetchAjaxCall.args[1].body).to.equal(expectedData);
+        expect(fetchAjaxCall.args[1].mode).to.equal('no-cors');
+        done();
       };
 
-      enrichBidderRequest(reqBidsConfigObj, bidderCode, wjsData);
+      const config = { params: {} };
+      const userConsent = {};
 
-      expect(reqBidsConfigObj.ortb2Fragments.bidder).to.deep.equal({
-        exampleBidder: {
-          device: {
-            ua: 'user-agent',
-            ext: {
-              wurfl: {
-                capability1: 'value1',
-                capability2: 'value2'
-              }
-            }
-          }
-        }
-      });
-    });
-  });
-
-  describe('makeOrtb2DeviceType', function () {
-    it('should return 1 when wurflData is_mobile and is_phone is true', function () {
-      const wurflData = { is_mobile: true, is_phone: true, is_tablet: false };
-      const result = makeOrtb2DeviceType(wurflData);
-      expect(result).to.equal(1);
-    });
-
-    it('should return 1 when wurflData is_mobile and is_tablet is true', function () {
-      const wurflData = { is_mobile: true, is_phone: false, is_tablet: true };
-      const result = makeOrtb2DeviceType(wurflData);
-      expect(result).to.equal(1);
-    });
-
-    it('should return 6 when wurflData is_mobile but is_phone and is_tablet are false', function () {
-      const wurflData = { is_mobile: true, is_phone: false, is_tablet: false };
-      const result = makeOrtb2DeviceType(wurflData);
-      expect(result).to.equal(6);
-    });
-
-    it('should return 2 when wurflData is_full_desktop is true', function () {
-      const wurflData = { is_full_desktop: true };
-      const result = makeOrtb2DeviceType(wurflData);
-      expect(result).to.equal(2);
-    });
-
-    it('should return 3 when wurflData is_connected_tv is true', function () {
-      const wurflData = { is_connected_tv: true };
-      const result = makeOrtb2DeviceType(wurflData);
-      expect(result).to.equal(3);
-    });
-
-    it('should return 4 when wurflData is_phone is true and is_mobile is false or undefined', function () {
-      const wurflData = { is_phone: true };
-      const result = makeOrtb2DeviceType(wurflData);
-      expect(result).to.equal(4);
-    });
-
-    it('should return 5 when wurflData is_tablet is true and is_mobile is false or undefined', function () {
-      const wurflData = { is_tablet: true };
-      const result = makeOrtb2DeviceType(wurflData);
-      expect(result).to.equal(5);
-    });
-
-    it('should return 7 when wurflData is_ott is true', function () {
-      const wurflData = { is_ott: true };
-      const result = makeOrtb2DeviceType(wurflData);
-      expect(result).to.equal(7);
-    });
-
-    it('should return undefined when wurflData is_mobile is true but is_phone and is_tablet are missing', function () {
-      const wurflData = { is_mobile: true };
-      const result = makeOrtb2DeviceType(wurflData);
-      expect(result).to.be.undefined;
-    });
-
-    it('should return undefined when no conditions are met', function () {
-      const wurflData = {};
-      const result = makeOrtb2DeviceType(wurflData);
-      expect(result).to.be.undefined;
-    });
-  });
-
-  describe('toNumber', function () {
-    it('converts valid numbers', function () {
-      expect(toNumber(42)).to.equal(42);
-      expect(toNumber(3.14)).to.equal(3.14);
-      expect(toNumber('100')).to.equal(100);
-      expect(toNumber('3.14')).to.equal(3.14);
-      expect(toNumber('  50  ')).to.equal(50);
-    });
-
-    it('converts booleans correctly', function () {
-      expect(toNumber(true)).to.equal(1);
-      expect(toNumber(false)).to.equal(0);
-    });
-
-    it('handles special cases', function () {
-      expect(toNumber(null)).to.be.undefined;
-      expect(toNumber('')).to.be.undefined;
-    });
-
-    it('returns undefined for non-numeric values', function () {
-      expect(toNumber('abc')).to.be.undefined;
-      expect(toNumber(undefined)).to.be.undefined;
-      expect(toNumber(NaN)).to.be.undefined;
-      expect(toNumber({})).to.be.undefined;
-      expect(toNumber([1, 2, 3])).to.be.undefined;
-      // WURFL.js cannot return [] so it is safe to not handle and return undefined
-      expect(toNumber([])).to.equal(0);
+      // First enrich bidders to populate enrichedBidders Set
+      wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, userConsent);
     });
   });
 });

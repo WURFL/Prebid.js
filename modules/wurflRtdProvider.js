@@ -121,6 +121,18 @@ const WURFLDebugger = {
     window.WURFLDebug.cacheWriteTime = duration;
     console.log(`[WURFL] WJS cache write time: ${duration.toFixed(2)}ms`);
     this._cacheWriteStart = null;
+
+    // Dispatch custom event when cache write data is available
+    if (typeof window !== 'undefined' && window.dispatchEvent) {
+      const event = new CustomEvent('wurflCacheWriteComplete', {
+        detail: {
+          duration: duration,
+          timestamp: Date.now(),
+          debugData: window.WURFLDebug
+        }
+      });
+      window.dispatchEvent(event);
+    }
   },
 
   // Data tracking methods

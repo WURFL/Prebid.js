@@ -229,6 +229,11 @@ function enrichDeviceFPD(reqBidsConfigObj, deviceData) {
  */
 function enrichDeviceBidder(reqBidsConfigObj, bidders, wjsDevice) {
   bidders.forEach((bidderCode) => {
+    // Check if bidder is authorized
+    if (!wjsDevice._isAuthorized(bidderCode)) {
+      return;
+    }
+
     // keep track of enriched bidders
     enrichedBidders.add(bidderCode);
     // inject WURFL data

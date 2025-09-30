@@ -500,31 +500,36 @@ const WurflJSDevice = {
 
   // Private method - returns the ortb2 device type based on WURFL data
   _makeOrtb2DeviceType(wurflData) {
-    if (wurflData.is_mobile) {
-      if (!('is_phone' in wurflData) || !('is_tablet' in wurflData)) {
-        return undefined;
-      }
-      if (wurflData.is_phone || wurflData.is_tablet) {
-        return ORTB2_DEVICE_TYPE.MOBILE_OR_TABLET;
-      }
-      return ORTB2_DEVICE_TYPE.CONNECTED_DEVICE;
-    }
-    if (wurflData.is_full_desktop) {
-      return ORTB2_DEVICE_TYPE.PERSONAL_COMPUTER;
-    }
-    if (wurflData.is_connected_tv) {
-      return ORTB2_DEVICE_TYPE.CONNECTED_TV;
-    }
-    if (wurflData.is_phone) {
-      return ORTB2_DEVICE_TYPE.PHONE;
-    }
-    if (wurflData.is_tablet) {
-      return ORTB2_DEVICE_TYPE.TABLET;
-    }
-    if (wurflData.is_ott) {
+    if (('is_ott' in wurflData) && (wurflData.is_ott)) {
       return ORTB2_DEVICE_TYPE.SET_TOP_BOX;
     }
-    return undefined;
+    if (('is_console' in wurflData) && (wurflData.is_console)) {
+      return ORTB2_DEVICE_TYPE.CONNECTED_DEVICE;
+    }
+    if (('physical_form_factor' in wurflData) && (wurflData.physical_form_factor === 'out_of_home_device')) {
+      return ORTB2_DEVICE_TYPE.OOH_DEVICE;
+    }
+    if (!('form_factor' in wurflData)) {
+      return undefined;
+    }
+    switch (wurflData.form_factor) {
+      case 'Desktop':
+        return ORTB2_DEVICE_TYPE.PERSONAL_COMPUTER;
+      case 'Smartphone':
+        return ORTB2_DEVICE_TYPE.PHONE;
+      case 'Feature Phone':
+        return ORTB2_DEVICE_TYPE.PHONE;
+      case 'Tablet':
+        return ORTB2_DEVICE_TYPE.TABLET;
+      case 'Smart-TV':
+        return ORTB2_DEVICE_TYPE.CONNECTED_TV;
+      case 'Other Non-Mobile':
+        return ORTB2_DEVICE_TYPE.CONNECTED_DEVICE;
+      case 'Other Mobile':
+        return ORTB2_DEVICE_TYPE.MOBILE_OR_TABLET;
+      default:
+        return undefined;
+    }
   },
 
   // Public API - returns device object for First Party Data (global)

@@ -122,7 +122,7 @@ describe('wurflRtdProvider', function () {
         expect(reqBidsConfigObj.ortb2Fragments.global.device).to.deep.include({
           make: 'Google',
           model: 'Nexus 5',
-          devicetype: 1,
+          devicetype: 4,
           os: 'Android',
           osv: '6.0',
           hwv: 'Nexus 5',
@@ -216,7 +216,7 @@ describe('wurflRtdProvider', function () {
         expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder1.device).to.deep.include({
           make: 'Google',
           model: 'Nexus 5',
-          devicetype: 1,
+          devicetype: 4,
           os: 'Android',
           osv: '6.0',
           hwv: 'Nexus 5',
@@ -231,7 +231,7 @@ describe('wurflRtdProvider', function () {
         expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder2.device).to.deep.include({
           make: 'Google',
           model: 'Nexus 5',
-          devicetype: 1,
+          devicetype: 4,
           os: 'Android',
           osv: '6.0',
           hwv: 'Nexus 5',
@@ -328,6 +328,207 @@ describe('wurflRtdProvider', function () {
 
       // First enrich bidders to populate enrichedBidders Set
       wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, userConsent);
+    });
+
+    describe('device type mapping', () => {
+      it('should map is_ott priority over form_factor', (done) => {
+        const wurflWithOtt = { ...WURFL, is_ott: true, form_factor: 'Desktop' };
+        const cachedData = { WURFL: wurflWithOtt, wurfl_pbjs };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          expect(reqBidsConfigObj.ortb2Fragments.global.device.devicetype).to.equal(7);
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
+      });
+
+      it('should map is_console priority over form_factor', (done) => {
+        const wurflWithConsole = { ...WURFL, is_console: true, form_factor: 'Desktop' };
+        const cachedData = { WURFL: wurflWithConsole, wurfl_pbjs };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          expect(reqBidsConfigObj.ortb2Fragments.global.device.devicetype).to.equal(6);
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
+      });
+
+      it('should map physical_form_factor out_of_home_device', (done) => {
+        const wurflWithOOH = { ...WURFL, physical_form_factor: 'out_of_home_device', form_factor: 'Desktop' };
+        const cachedData = { WURFL: wurflWithOOH, wurfl_pbjs };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          expect(reqBidsConfigObj.ortb2Fragments.global.device.devicetype).to.equal(8);
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
+      });
+
+      it('should map form_factor Desktop to PERSONAL_COMPUTER', (done) => {
+        const wurflDesktop = { ...WURFL, form_factor: 'Desktop' };
+        const cachedData = { WURFL: wurflDesktop, wurfl_pbjs };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          expect(reqBidsConfigObj.ortb2Fragments.global.device.devicetype).to.equal(2);
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
+      });
+
+      it('should map form_factor Smartphone to PHONE', (done) => {
+        const wurflSmartphone = { ...WURFL, form_factor: 'Smartphone' };
+        const cachedData = { WURFL: wurflSmartphone, wurfl_pbjs };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          expect(reqBidsConfigObj.ortb2Fragments.global.device.devicetype).to.equal(4);
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
+      });
+
+      it('should map form_factor Tablet to TABLET', (done) => {
+        const wurflTablet = { ...WURFL, form_factor: 'Tablet' };
+        const cachedData = { WURFL: wurflTablet, wurfl_pbjs };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          expect(reqBidsConfigObj.ortb2Fragments.global.device.devicetype).to.equal(5);
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
+      });
+
+      it('should map form_factor Smart-TV to CONNECTED_TV', (done) => {
+        const wurflSmartTV = { ...WURFL, form_factor: 'Smart-TV' };
+        const cachedData = { WURFL: wurflSmartTV, wurfl_pbjs };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          expect(reqBidsConfigObj.ortb2Fragments.global.device.devicetype).to.equal(3);
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
+      });
+
+      it('should map form_factor Other Non-Mobile to CONNECTED_DEVICE', (done) => {
+        const wurflOtherNonMobile = { ...WURFL, form_factor: 'Other Non-Mobile' };
+        const cachedData = { WURFL: wurflOtherNonMobile, wurfl_pbjs };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          expect(reqBidsConfigObj.ortb2Fragments.global.device.devicetype).to.equal(6);
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
+      });
+
+      it('should map form_factor Other Mobile to MOBILE_OR_TABLET', (done) => {
+        const wurflOtherMobile = { ...WURFL, form_factor: 'Other Mobile' };
+        const cachedData = { WURFL: wurflOtherMobile, wurfl_pbjs };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          expect(reqBidsConfigObj.ortb2Fragments.global.device.devicetype).to.equal(1);
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
+      });
+
+      it('should return undefined when form_factor is missing', (done) => {
+        const wurflNoFormFactor = { ...WURFL };
+        delete wurflNoFormFactor.form_factor;
+        const cachedData = { WURFL: wurflNoFormFactor, wurfl_pbjs };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          expect(reqBidsConfigObj.ortb2Fragments.global.device.devicetype).to.be.undefined;
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
+      });
+
+      it('should return undefined for unknown form_factor', (done) => {
+        const wurflUnknownFormFactor = { ...WURFL, form_factor: 'UnknownDevice' };
+        const cachedData = { WURFL: wurflUnknownFormFactor, wurfl_pbjs };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          expect(reqBidsConfigObj.ortb2Fragments.global.device.devicetype).to.be.undefined;
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
+      });
     });
   });
 });

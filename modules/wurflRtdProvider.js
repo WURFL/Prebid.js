@@ -369,7 +369,32 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, _) => {
  * @param {Object} userConsent User consent data
  */
 function onAuctionEndEvent(auctionDetails, config, userConsent) {
-  // TODO: Implement onAuctionEndEvent logic
+  const altHost = config.params?.altHost ?? null;
+
+  let host = WURFL_JS_HOST;
+  if (altHost) {
+    host = altHost;
+  }
+
+  const url = new URL(host);
+  url.pathname = STATS_ENDPOINT_PATH;
+
+  if (enrichedBidders.size === 0) {
+    return;
+  }
+
+  var payload = JSON.stringify({ bidders: [...enrichedBidders] });
+  const sentBeacon = sendBeacon(url.toString(), payload);
+  if (sentBeacon) {
+    return;
+  }
+
+  fetch(url.toString(), {
+    method: 'POST',
+    body: payload,
+    mode: 'no-cors',
+    keepalive: true
+  });
 }
 
 // The WURFL submodule

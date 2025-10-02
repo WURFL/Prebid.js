@@ -57,15 +57,17 @@ const enrichedBidders = new Set();
 const WURFLDebugger = {
   // Initialize WURFL debug tracking object
   init() {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && !window.WURFLDebug) {
       window.WURFLDebug = {
         // Data source for current auction
         dataSource: 'unknown', // 'cache' | 'lce'
 
         // Simple timing measurements
+        moduleExecutionTime: null, // Total time from getBidRequestData start to callback
         cacheReadTime: null,    // Single cache read time (hit or miss)
         lceDetectionTime: null, // LCE detection time (only if dataSource = 'lce')
         cacheWriteTime: null,   // Async cache write time (for future auctions)
+        wurflJsLoadTime: null,  // Total time from WURFL.js load start to cache complete
 
         // The actual data used in current auction
         data: {
@@ -80,9 +82,24 @@ const WURFLDebugger = {
     }
   },
   // Private timing start values
+  _moduleExecutionStart: null,
   _cacheReadStart: null,
   _lceDetectionStart: null,
   _cacheWriteStart: null,
+  _wurflJsLoadStart: null,
+
+  // Module execution timing methods
+  moduleExecutionStart() {
+    this._moduleExecutionStart = performance.now();
+  },
+
+  moduleExecutionStop() {
+    if (this._moduleExecutionStart === null) return;
+    const duration = performance.now() - this._moduleExecutionStart;
+    window.WURFLDebug.moduleExecutionTime = duration;
+    console.log(`[WURFL] Module execution time: ${duration.toFixed(2)}ms`);
+    this._moduleExecutionStart = null;
+  },
 
   // Cache read timing methods
   cacheReadStart() {
@@ -122,6 +139,14 @@ const WURFLDebugger = {
     console.log(`[WURFL] WJS cache write time: ${duration.toFixed(2)}ms`);
     this._cacheWriteStart = null;
 
+    // Calculate total WURFL.js load time (from load start to cache complete)
+    if (this._wurflJsLoadStart !== null) {
+      const totalLoadTime = performance.now() - this._wurflJsLoadStart;
+      window.WURFLDebug.wurflJsLoadTime = totalLoadTime;
+      console.log(`[WURFL] Total WURFL.js load time: ${totalLoadTime.toFixed(2)}ms`);
+      this._wurflJsLoadStart = null;
+    }
+
     // Dispatch custom event when cache write data is available
     if (typeof window !== 'undefined' && window.dispatchEvent) {
       const event = new CustomEvent('wurflCacheWriteComplete', {
@@ -133,6 +158,11 @@ const WURFLDebugger = {
       });
       window.dispatchEvent(event);
     }
+  },
+
+  // WURFL.js load timing methods
+  wurflJsLoadStart() {
+    this._wurflJsLoadStart = performance.now();
   },
 
   // Data tracking methods
@@ -267,6 +297,9 @@ function loadWurflJsAsync(config, bidders) {
 
   console.log('WURFL RTD loading WURFL.js from', url.toString());
 
+  // Start timing WURFL.js load
+  WURFLDebugger.wurflJsLoadStart();
+
   if (isDebug) {
     url.searchParams.set('debug', 'true');
   }
@@ -325,6 +358,9 @@ const init = (config, userConsent) => {
  * @param {Object} userConsent User consent data
  */
 const getBidRequestData = (reqBidsConfigObj, callback, config, _) => {
+  // Start module execution timing
+  WURFLDebugger.moduleExecutionStart();
+
   // Extract bidders from request configuration
   const bidders = new Set();
   reqBidsConfigObj.adUnits.forEach(adUnit => {
@@ -348,6 +384,7 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, _) => {
       enrichDeviceFPD(reqBidsConfigObj, wjsDevice.FPD());
     }
     enrichDeviceBidder(reqBidsConfigObj, bidders, wjsDevice);
+    WURFLDebugger.moduleExecutionStop();
     callback();
     return;
   }
@@ -364,6 +401,7 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, _) => {
   // Load WURFL.js async for future requests
   loadWurflJsAsync(config, bidders);
 
+  WURFLDebugger.moduleExecutionStop();
   callback();
 }
 

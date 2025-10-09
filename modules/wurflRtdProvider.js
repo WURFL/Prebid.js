@@ -304,7 +304,7 @@ function loadWurflJsAsync(config, bidders) {
     url.searchParams.set('debug', 'true');
   }
 
-  url.searchParams.set('mode', 'prebid');
+  url.searchParams.set('mode', 'prebid2');
 
   // Add bidders list for server optimization
   if (bidders && bidders.size > 0) {

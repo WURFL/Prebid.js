@@ -102,6 +102,105 @@ describe('wurflRtdProvider', function () {
       }
     };
 
+    // TTL handling tests
+    describe('TTL handling', () => {
+      it('should use valid (not expired) cached data without triggering async load', (done) => {
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        // Setup cache with valid TTL (expires in future)
+        const futureExpiry = Date.now() + 1000000; // expires in future
+        const cachedData = {
+          WURFL,
+          wurfl_pbjs: { ...wurfl_pbjs, ttl: 2592000 },
+          expire_at: futureExpiry
+        };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        const callback = () => {
+          // Verify global FPD enrichment happened (not over quota)
+          expect(reqBidsConfigObj.ortb2Fragments.global.device).to.deep.include({
+            make: 'Google',
+            model: 'Nexus 5',
+            devicetype: 4
+          });
+
+          // Verify no async load was triggered (cache is valid)
+          expect(loadExternalScriptStub.called).to.be.false;
+
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
+      });
+
+      it('should use expired cached data and trigger async refresh', (done) => {
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        // Setup cache with expired TTL
+        const pastExpiry = Date.now() - 1000; // expired 1 second ago
+        const cachedData = {
+          WURFL,
+          wurfl_pbjs: { ...wurfl_pbjs, ttl: 2592000 },
+          expire_at: pastExpiry
+        };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        const callback = () => {
+          // Verify expired cache data is still used for enrichment
+          expect(reqBidsConfigObj.ortb2Fragments.global.device).to.deep.include({
+            make: 'Google',
+            model: 'Nexus 5',
+            devicetype: 4
+          });
+
+          // Verify bidders were enriched
+          expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder1).to.exist;
+          expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder2).to.exist;
+
+          // Verify async load WAS triggered for refresh (cache expired)
+          expect(loadExternalScriptStub.calledOnce).to.be.true;
+
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
+      });
+    });
+
+    // Debug mode initialization tests
+    describe('Debug mode', () => {
+      afterEach(() => {
+        // Clean up window object after each test
+        delete window.WurflRtdDebug;
+      });
+
+      it('should not create window.WurflRtdDebug when debug=false', () => {
+        const config = { params: { debug: false } };
+        wurflSubmodule.init(config);
+        expect(window.WurflRtdDebug).to.be.undefined;
+      });
+
+      it('should not create window.WurflRtdDebug when debug is not configured', () => {
+        const config = { params: {} };
+        wurflSubmodule.init(config);
+        expect(window.WurflRtdDebug).to.be.undefined;
+      });
+
+      it('should create window.WurflRtdDebug when debug=true', () => {
+        const config = { params: { debug: true } };
+        wurflSubmodule.init(config);
+        expect(window.WurflRtdDebug).to.exist;
+        expect(window.WurflRtdDebug.dataSource).to.equal('unknown');
+        expect(window.WurflRtdDebug.cacheExpired).to.be.false;
+      });
+    });
+
     it('initialises the WURFL RTD provider', function () {
       expect(wurflSubmodule.init()).to.be.true;
     });
@@ -566,84 +665,6 @@ describe('wurflRtdProvider', function () {
 
         const callback = () => {
           expect(reqBidsConfigObj.ortb2Fragments.global.device.devicetype).to.be.undefined;
-          done();
-        };
-
-        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
-      });
-    });
-
-    describe('TTL handling', () => {
-      it('should use valid (not expired) cached data without triggering async load', (done) => {
-        reqBidsConfigObj.ortb2Fragments.global.device = {};
-        reqBidsConfigObj.ortb2Fragments.bidder = {};
-
-        // Setup cache with valid TTL (expires in future)
-        const futureExpiry = Date.now() + 1000000; // expires in future
-        const cachedData = {
-          WURFL,
-          wurfl_pbjs: { ...wurfl_pbjs, ttl: 2592000 },
-          expire_at: futureExpiry
-        };
-        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
-        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
-        sandbox.stub(storage, 'hasLocalStorage').returns(true);
-
-        const callback = () => {
-          // Verify WURFLDebug shows cache not expired
-          expect(window.WURFLDebug.cacheExpired).to.be.false;
-          expect(window.WURFLDebug.dataSource).to.equal('cache');
-
-          // Verify global FPD enrichment happened (not over quota)
-          expect(reqBidsConfigObj.ortb2Fragments.global.device).to.deep.include({
-            make: 'Google',
-            model: 'Nexus 5',
-            devicetype: 4
-          });
-
-          // Verify no async load was triggered
-          expect(loadExternalScriptStub.called).to.be.false;
-
-          done();
-        };
-
-        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
-      });
-
-      it('should use expired cached data and trigger async refresh', (done) => {
-        reqBidsConfigObj.ortb2Fragments.global.device = {};
-        reqBidsConfigObj.ortb2Fragments.bidder = {};
-
-        // Setup cache with expired TTL
-        const pastExpiry = Date.now() - 1000; // expired 1 second ago
-        const cachedData = {
-          WURFL,
-          wurfl_pbjs: { ...wurfl_pbjs, ttl: 2592000 },
-          expire_at: pastExpiry
-        };
-        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
-        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
-        sandbox.stub(storage, 'hasLocalStorage').returns(true);
-
-        const callback = () => {
-          // Verify WURFLDebug shows cache expired
-          expect(window.WURFLDebug.cacheExpired).to.be.true;
-          expect(window.WURFLDebug.dataSource).to.equal('cache');
-
-          // Verify expired cache data is still used for enrichment
-          expect(reqBidsConfigObj.ortb2Fragments.global.device).to.deep.include({
-            make: 'Google',
-            model: 'Nexus 5',
-            devicetype: 4
-          });
-
-          // Verify bidders were enriched
-          expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder1).to.exist;
-          expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder2).to.exist;
-
-          // Verify async load WAS triggered for refresh
-          expect(loadExternalScriptStub.calledOnce).to.be.true;
-
           done();
         };
 

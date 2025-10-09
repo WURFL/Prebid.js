@@ -340,8 +340,29 @@ function loadWurflJsAsync(config, bidders) {
  */
 const init = (config, userConsent) => {
   WURFLDebugger.init();
-  logger.logMessage('initialized');
-  return true;
+
+  // A/B testing: early return if not enabled
+  const abTest = config?.params?.abTest ?? false;
+  if (!abTest) {
+    logger.logMessage('initialized');
+    return true;
+  }
+
+  // A/B testing enabled - determine treatment vs control
+  const abName = config?.params?.abName ?? 'unknown';
+  const abSplit = config?.params?.abSplit ?? 50;
+
+  const randomValue = Math.floor(Math.random() * 100);
+  const isInTreatment = randomValue < abSplit;
+
+  if (isInTreatment) {
+    logger.logMessage(`A/B test "${abName}": user in treatment group (enabled)`);
+    return true;
+  }
+
+  // User is in control group - disable module
+  logger.logMessage(`A/B test "${abName}": user in control group (disabled)`);
+  return false;
 }
 
 /**

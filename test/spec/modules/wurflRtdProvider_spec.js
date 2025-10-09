@@ -106,6 +106,48 @@ describe('wurflRtdProvider', function () {
       expect(wurflSubmodule.init()).to.be.true;
     });
 
+    describe('A/B testing', () => {
+      it('should return true when A/B testing is disabled', () => {
+        const config = { params: { abTest: false } };
+        expect(wurflSubmodule.init(config)).to.be.true;
+      });
+
+      it('should return true when A/B testing is not configured', () => {
+        const config = { params: {} };
+        expect(wurflSubmodule.init(config)).to.be.true;
+      });
+
+      it('should return true for users in treatment group (random < abSplit)', () => {
+        sandbox.stub(Math, 'random').returns(0.25); // 25% -> random value = 25
+        const config = { params: { abTest: true, abName: 'test_sept', abSplit: 50 } };
+        expect(wurflSubmodule.init(config)).to.be.true;
+      });
+
+      it('should return false for users in control group (random >= abSplit)', () => {
+        sandbox.stub(Math, 'random').returns(0.75); // 75% -> random value = 75
+        const config = { params: { abTest: true, abName: 'test_sept', abSplit: 50 } };
+        expect(wurflSubmodule.init(config)).to.be.false;
+      });
+
+      it('should use default abSplit of 50 when not specified', () => {
+        sandbox.stub(Math, 'random').returns(0.40); // 40% -> random value = 40
+        const config = { params: { abTest: true, abName: 'test_sept' } };
+        expect(wurflSubmodule.init(config)).to.be.true;
+      });
+
+      it('should handle abSplit of 0 (all control)', () => {
+        sandbox.stub(Math, 'random').returns(0.01); // 1% -> random value = 1
+        const config = { params: { abTest: true, abName: 'test_sept', abSplit: 0 } };
+        expect(wurflSubmodule.init(config)).to.be.false;
+      });
+
+      it('should handle abSplit of 100 (all treatment)', () => {
+        sandbox.stub(Math, 'random').returns(0.99); // 99% -> random value = 99
+        const config = { params: { abTest: true, abName: 'test_sept', abSplit: 100 } };
+        expect(wurflSubmodule.init(config)).to.be.true;
+      });
+    });
+
     it('should enrich multiple bidders with cached WURFL data (not over quota)', (done) => {
       // Reset reqBidsConfigObj to clean state
       reqBidsConfigObj.ortb2Fragments.global.device = {};

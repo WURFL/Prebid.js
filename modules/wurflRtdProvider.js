@@ -283,9 +283,6 @@ function loadWurflJsAsync(config, bidders) {
   const altHost = config.params?.altHost ?? null;
   const isDebug = config.params?.debug ?? false;
 
-  // TODO: remove altPath support only for testing
-  const altPath = config.params?.altPath ?? null;
-
   let host = WURFL_JS_HOST;
   if (altHost) {
     host = altHost;
@@ -293,9 +290,6 @@ function loadWurflJsAsync(config, bidders) {
 
   const url = new URL(host);
   url.pathname = WURFL_JS_ENDPOINT_PATH;
-  if (altPath) {
-    url.pathname = altPath;
-  }
 
   // Start timing WURFL.js load
   WURFLDebugger.wurflJsLoadStart();

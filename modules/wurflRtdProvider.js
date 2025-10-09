@@ -305,7 +305,6 @@ function loadWurflJsAsync(config, bidders) {
   }
 
   url.searchParams.set('mode', 'prebid');
-  url.searchParams.set('wurfl_id', 'true');
 
   // Add bidders list for server optimization
   if (bidders && bidders.size > 0) {

@@ -278,8 +278,9 @@ describe('wurflRtdProvider', function () {
         expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder1.device.ext.wurfl).to.deep.equal(WURFL);
         expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder2.device.ext.wurfl).to.deep.equal(WURFL);
 
-        // bidder3 is NOT authorized, should get empty object
-        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder3).to.be.undefined;
+        // bidder3 is NOT authorized, but should get basic+pub caps (tested in detail in dedicated test)
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder3).to.exist;
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder3.device.ext.wurfl).to.exist;
 
         done();
       };
@@ -386,6 +387,65 @@ describe('wurflRtdProvider', function () {
 
         // bidder3 is NOT authorized, should get nothing
         expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder3).to.be.undefined;
+
+        done();
+      };
+
+      const config = { params: {} };
+      const userConsent = {};
+
+      wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, userConsent);
+    });
+
+    it('should pass basic+pub caps to unauthorized bidders when under quota', (done) => {
+      // Reset reqBidsConfigObj to clean state
+      reqBidsConfigObj.ortb2Fragments.global.device = {};
+      reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+      // Setup localStorage with cached WURFL data (NOT over quota)
+      const cachedData = { WURFL, wurfl_pbjs };
+      sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+      sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+      sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+      const callback = () => {
+        // Verify global FPD has device data (not over quota)
+        expect(reqBidsConfigObj.ortb2Fragments.global.device).to.deep.include({
+          make: 'Google',
+          model: 'Nexus 5',
+          devicetype: 4
+        });
+
+        // Calculate expected caps for basic + pub (no bidder-specific)
+        const basicIndices = wurfl_pbjs.global.basic_set.cap_indices;
+        const pubIndices = wurfl_pbjs.global.publisher.cap_indices;
+        const allBasicPubIndices = [...new Set([...basicIndices, ...pubIndices])];
+
+        const expectedBasicPubCaps = {};
+        allBasicPubIndices.forEach(index => {
+          const capName = wurfl_pbjs.caps[index];
+          if (capName && capName in WURFL) {
+            expectedBasicPubCaps[capName] = WURFL[capName];
+          }
+        });
+
+        // bidder1 and bidder2 are authorized, should get ALL caps (basic + pub + bidder-specific)
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder1.device.ext.wurfl).to.deep.equal(WURFL);
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder2.device.ext.wurfl).to.deep.equal(WURFL);
+
+        // bidder3 is NOT authorized, should get ONLY basic + pub caps (no bidder-specific)
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder3).to.exist;
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder3.device).to.exist;
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder3.device.ext).to.exist;
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder3.device.ext.wurfl).to.deep.equal(expectedBasicPubCaps);
+
+        // Verify bidder3 does NOT have FPD device data (only authorized bidders get that when over quota)
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder3.device.make).to.be.undefined;
+        expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder3.device.model).to.be.undefined;
+
+        // Verify the caps calculation: basic+pub union should equal what bidder3 received
+        const bidder3CapCount = Object.keys(reqBidsConfigObj.ortb2Fragments.bidder.bidder3.device.ext.wurfl).length;
+        expect(bidder3CapCount).to.equal(allBasicPubIndices.length);
 
         done();
       };

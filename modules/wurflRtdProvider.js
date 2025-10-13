@@ -273,15 +273,20 @@ function enrichDeviceFPD(reqBidsConfigObj, deviceData) {
  */
 function enrichDeviceBidder(reqBidsConfigObj, bidders, wjsDevice) {
   bidders.forEach((bidderCode) => {
-    // Check if bidder is authorized
-    if (!wjsDevice._isAuthorized(bidderCode)) {
+    // Get bidder data (handles both authorized and unauthorized bidders)
+    const bidderDevice = wjsDevice.Bidder(bidderCode);
+
+    // Skip if no data to inject (over quota + unauthorized)
+    if (Object.keys(bidderDevice).length === 0) {
       return;
     }
 
-    // keep track of enriched bidders
-    enrichedBidders.add(bidderCode);
-    // inject WURFL data
-    const bidderDevice = wjsDevice.Bidder(bidderCode);
+    // Track only authorized bidders for analytics
+    if (wjsDevice._isAuthorized(bidderCode)) {
+      enrichedBidders.add(bidderCode);
+    }
+
+    // Inject WURFL data
     mergeDeep(reqBidsConfigObj.ortb2Fragments.bidder, { [bidderCode]: bidderDevice });
   });
 }
@@ -638,14 +643,18 @@ const WurflJSDevice = {
 
   // Public API - returns device with bidder-specific ext data
   Bidder(bidderCode) {
-    if (!this._isAuthorized(bidderCode)) {
+    const isAuthorized = this._isAuthorized(bidderCode);
+    const isOverQuota = this._isOverQuota();
+
+    // When unauthorized and over quota, return empty
+    if (!isAuthorized && isOverQuota) {
       return {};
     }
 
     // Start with empty device, populate only if publisher is over quota
     // When over quota, we send device data to each authorized bidder individually
     let fpdDevice = {};
-    if (this._isOverQuota()) {
+    if (isOverQuota) {
       fpdDevice = this.FPD();
     }
 
@@ -653,11 +662,12 @@ const WurflJSDevice = {
       return { device: fpdDevice };
     }
 
-    // Create union of all capability data (bidder-specific overrides basic and pub)
+    // For authorized bidders: basic + pub + bidder-specific caps
+    // For unauthorized bidders (under quota only): basic + pub caps (no bidder-specific)
     const wurflData = {
       ...this._getBasicCaps(),
       ...this._getPubCaps(),
-      ...this._getBidderCaps(bidderCode)
+      ...(isAuthorized ? this._getBidderCaps(bidderCode) : {})
     };
 
     return {

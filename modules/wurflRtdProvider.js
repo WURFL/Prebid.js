@@ -323,27 +323,54 @@ function loadWurflJsAsync(config, bidders) {
   }
 
   try {
-    loadExternalScript(url.toString(), MODULE_TYPE_RTD, MODULE_NAME, () => {
-      logger.logMessage('async WURFL.js script injected');
-      window.WURFLPromises.complete.then((res) => {
-        logger.logMessage('async WURFL.js data received', res);
-        if (res.wurfl_pbjs) {
-          // Create optimized cache object with only relevant device data
-          WurflDebugger.cacheWriteStart();
-          const cacheData = {
-            WURFL: res.WURFL,
-            wurfl_pbjs: res.wurfl_pbjs,
-            expire_at: Date.now() + (res.wurfl_pbjs.ttl * 1000)
-          };
-          setObjectToStorage(WURFL_WJS_STORAGE_KEY, cacheData);
-          WurflDebugger.cacheWriteStop();
-          logger.logMessage('WURFL.js device cache stored to localStorage');
-        } else {
-          logger.logError('invalid async WURFL.js for Prebid response');
+    // Set up event listener before loading script
+    const handleWurflDetection = (event) => {
+      try {
+        // Extract data from event detail or fallback to window globals
+        const wurflData = event.detail || {
+          WURFL: window.WURFL,
+          wurfl_pbjs: window.wurfl_pbjs
+        };
+
+        logger.logMessage('WURFL.js data received', wurflData);
+
+        // Validate required data structure
+        if (!wurflData?.wurfl_pbjs) {
+          logger.logError('Invalid WURFL.js response: missing wurfl_pbjs');
+          return;
         }
-      }).catch((err) => {
-        logger.logError('async WURFL.js promise error:', err);
-      });
+
+        const ttl = wurflData.wurfl_pbjs.ttl;
+        if (!ttl || typeof ttl !== 'number') {
+          logger.logError('Invalid WURFL.js response: missing or invalid TTL');
+          return;
+        }
+
+        // Store to cache with performance monitoring
+        WurflDebugger.cacheWriteStart();
+
+        const cacheData = {
+          WURFL: wurflData.WURFL,
+          wurfl_pbjs: wurflData.wurfl_pbjs,
+          expire_at: Date.now() + (ttl * 1000)
+        };
+
+        setObjectToStorage(WURFL_WJS_STORAGE_KEY, cacheData);
+
+        WurflDebugger.cacheWriteStop();
+
+        logger.logMessage('WURFL.js device cache stored to localStorage');
+      } catch (err) {
+        logger.logError('Failed to process WURFL.js data:', err);
+      }
+    };
+
+    // Add listener with once:true for auto-cleanup
+    window.addEventListener('WurflJSDetectionComplete', handleWurflDetection, { once: true });
+
+    // Load the script
+    loadExternalScript(url.toString(), MODULE_TYPE_RTD, MODULE_NAME, () => {
+      logger.logMessage('WURFL.js script injected');
     });
   } catch (err) {
     logger.logError('async WURFL.js loading error:', err);

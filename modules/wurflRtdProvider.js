@@ -20,7 +20,7 @@ const WURFL_JS_ENDPOINT_PATH = '/wurfl.js';
 const STATS_ENDPOINT_PATH = '/v1/prebid/stats';
 
 // Storage keys for localStorage caching
-const WURFL_WJS_STORAGE_KEY = 'wurfl-wjs';
+const WURFL_RTD_STORAGE_KEY = 'wurflrtd';
 
 // OpenRTB 2.0 device type constants
 // Based on OpenRTB 2.6 specification
@@ -355,7 +355,7 @@ function loadWurflJsAsync(config, bidders) {
           expire_at: Date.now() + (ttl * 1000)
         };
 
-        setObjectToStorage(WURFL_WJS_STORAGE_KEY, cacheData);
+        setObjectToStorage(WURFL_RTD_STORAGE_KEY, cacheData);
 
         WurflDebugger.cacheWriteStop();
 
@@ -432,7 +432,7 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
 
   // Priority 1: Check if WURFL.js response is cached
   WurflDebugger.cacheReadStart();
-  const cachedWurflData = getObjectFromStorage(WURFL_WJS_STORAGE_KEY);
+  const cachedWurflData = getObjectFromStorage(WURFL_RTD_STORAGE_KEY);
   WurflDebugger.cacheReadStop();
 
   if (cachedWurflData) {

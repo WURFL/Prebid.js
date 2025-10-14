@@ -73,25 +73,16 @@ describe('wurflRtdProvider', function () {
 
     beforeEach(function () {
       sandbox = sinon.createSandbox();
-
-      // Stub loadExternalScript to simulate WURFL.js loading and dispatch the event
-      sandbox.stub(loadExternalScriptStub, 'callsFake').value((url, moduleType, moduleName, callback) => {
-        // Call the callback to simulate script injection
-        if (callback) callback();
-
-        // Dispatch the WurflJSDetectionComplete event with data
-        setTimeout(() => {
-          const event = new CustomEvent('WurflJSDetectionComplete', {
-            detail: { WURFL, wurfl_pbjs }
-          });
-          window.dispatchEvent(event);
-        }, 0);
-      });
+      window.WURFLPromises = {
+        init: new Promise(function (resolve, reject) { resolve({ WURFL, wurfl_pbjs }) }),
+        complete: new Promise(function (resolve, reject) { resolve({ WURFL, wurfl_pbjs }) }),
+      };
     });
 
     afterEach(() => {
       // Restore the original functions
       sandbox.restore();
+      window.WURFLPromises = undefined;
     });
 
     // Bid request config

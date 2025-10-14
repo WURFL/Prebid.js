@@ -70,6 +70,8 @@ describe('wurflRtdProvider', function () {
     const expectedData = JSON.stringify({ bidders: ['bidder1', 'bidder2'] });
 
     let sandbox;
+    // originalUserAgentData to restore after tests
+    let originalUAData;
 
     beforeEach(function () {
       sandbox = sinon.createSandbox();
@@ -77,12 +79,17 @@ describe('wurflRtdProvider', function () {
         init: new Promise(function (resolve, reject) { resolve({ WURFL, wurfl_pbjs }) }),
         complete: new Promise(function (resolve, reject) { resolve({ WURFL, wurfl_pbjs }) }),
       };
+      originalUAData = window.navigator.userAgentData;
     });
 
     afterEach(() => {
       // Restore the original functions
       sandbox.restore();
       window.WURFLPromises = undefined;
+      Object.defineProperty(window.navigator, 'userAgentData', {
+        value: originalUAData,
+        configurable: true,
+      });
     });
 
     // Bid request config
@@ -136,10 +143,15 @@ describe('wurflRtdProvider', function () {
         wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
       });
 
-      it('should use expired cached data and trigger async refresh', (done) => {
+      it('should use expired cached data and trigger async refresh (without Client Hints)', (done) => {
         reqBidsConfigObj.ortb2Fragments.global.device = {};
         reqBidsConfigObj.ortb2Fragments.bidder = {};
 
+        Object.defineProperty(navigator, 'userAgentData', {
+          value: undefined,
+          configurable: true,
+          writable: true
+        });
         // Setup cache with expired TTL
         const pastExpiry = Date.now() - 1000; // expired 1 second ago
         const cachedData = {

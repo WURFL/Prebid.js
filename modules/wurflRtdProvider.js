@@ -322,31 +322,51 @@ function loadWurflJsAsync(config, bidders) {
     url.searchParams.set('bidders', Array.from(bidders).join(','));
   }
 
-  try {
-    loadExternalScript(url.toString(), MODULE_TYPE_RTD, MODULE_NAME, () => {
-      logger.logMessage('async WURFL.js script injected');
-      window.WURFLPromises.complete.then((res) => {
-        logger.logMessage('async WURFL.js data received', res);
-        if (res.wurfl_pbjs) {
-          // Create optimized cache object with only relevant device data
-          WurflDebugger.cacheWriteStart();
-          const cacheData = {
-            WURFL: res.WURFL,
-            wurfl_pbjs: res.wurfl_pbjs,
-            expire_at: Date.now() + (res.wurfl_pbjs.ttl * 1000)
-          };
-          setObjectToStorage(WURFL_RTD_STORAGE_KEY, cacheData);
-          WurflDebugger.cacheWriteStop();
-          logger.logMessage('WURFL.js device cache stored to localStorage');
-        } else {
-          logger.logError('invalid async WURFL.js for Prebid response');
-        }
-      }).catch((err) => {
-        logger.logError('async WURFL.js promise error:', err);
+  // Helper function to load WURFL.js script
+  const loadWurflJs = (scriptUrl) => {
+    try {
+      loadExternalScript(scriptUrl, MODULE_TYPE_RTD, MODULE_NAME, () => {
+        logger.logMessage('async WURFL.js script injected');
+        window.WURFLPromises.complete.then((res) => {
+          logger.logMessage('async WURFL.js data received', res);
+          if (res.wurfl_pbjs) {
+            // Create optimized cache object with only relevant device data
+            WurflDebugger.cacheWriteStart();
+            const cacheData = {
+              WURFL: res.WURFL,
+              wurfl_pbjs: res.wurfl_pbjs,
+              expire_at: Date.now() + (res.wurfl_pbjs.ttl * 1000)
+            };
+            setObjectToStorage(WURFL_RTD_STORAGE_KEY, cacheData);
+            WurflDebugger.cacheWriteStop();
+            logger.logMessage('WURFL.js device cache stored to localStorage');
+          } else {
+            logger.logError('invalid async WURFL.js for Prebid response');
+          }
+        }).catch((err) => {
+          logger.logError('async WURFL.js promise error:', err);
+        });
       });
-    });
-  } catch (err) {
-    logger.logError('async WURFL.js loading error:', err);
+    } catch (err) {
+      logger.logError('async WURFL.js loading error:', err);
+    }
+  };
+
+  // Collect Client Hints if available, then load script
+  if (navigator?.userAgentData?.getHighEntropyValues) {
+    const hints = ['architecture', 'bitness', 'model', 'platformVersion', 'uaFullVersion', 'fullVersionList'];
+    navigator.userAgentData.getHighEntropyValues(hints)
+      .then(ch => {
+        if (ch !== null) {
+          url.searchParams.set('uach', JSON.stringify(ch));
+        }
+      })
+      .finally(() => {
+        loadWurflJs(url.toString());
+      });
+  } else {
+    // Load script immediately when Client Hints not available
+    loadWurflJs(url.toString());
   }
 }
 

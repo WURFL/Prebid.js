@@ -109,6 +109,104 @@ describe('wurflRtdProvider', function () {
       }
     };
 
+    // Client Hints tests
+    describe('Client Hints support', () => {
+      it('should collect and send client hints when available', (done) => {
+        const clock = sinon.useFakeTimers();
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        // Mock Client Hints
+        const mockClientHints = {
+          architecture: 'arm',
+          bitness: '64',
+          model: 'Pixel 5',
+          platformVersion: '13.0.0',
+          uaFullVersion: '130.0.6723.58',
+          fullVersionList: [
+            { brand: 'Chromium', version: '130.0.6723.58' }
+          ]
+        };
+
+        const getHighEntropyValuesStub = sandbox.stub().resolves(mockClientHints);
+        Object.defineProperty(navigator, 'userAgentData', {
+          value: { getHighEntropyValues: getHighEntropyValuesStub },
+          configurable: true,
+          writable: true
+        });
+
+        // Empty cache to trigger async load
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(null);
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        const callback = async () => {
+          console.log('Callback executed');
+          // Verify client hints were requested
+          expect(getHighEntropyValuesStub.calledOnce).to.be.true;
+          expect(getHighEntropyValuesStub.calledWith(
+            ['architecture', 'bitness', 'model', 'platformVersion', 'uaFullVersion', 'fullVersionList']
+          )).to.be.true;
+
+          try {
+            // Use tickAsync to properly handle promise microtasks
+            await clock.tickAsync(1);
+
+            // Now verify WURFL.js was loaded with client hints in URL
+            expect(loadExternalScriptStub.called).to.be.true;
+            const scriptUrl = loadExternalScriptStub.getCall(0).args[0];
+
+            const url = new URL(scriptUrl);
+            const uachParam = url.searchParams.get('uach');
+            expect(uachParam).to.not.be.null;
+
+            const parsedHints = JSON.parse(uachParam);
+            expect(parsedHints).to.deep.equal(mockClientHints);
+
+            clock.restore();
+            done();
+          } catch (err) {
+            clock.restore();
+            done(err);
+          }
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
+
+      })
+      it('should load WURFL.js without client hints when not available', (done) => {
+        console.log('Starting No Client Hints test...');
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        // No client hints available
+        Object.defineProperty(navigator, 'userAgentData', {
+          value: undefined,
+          configurable: true,
+          writable: true
+        });
+
+        // Empty cache to trigger async load
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(null);
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        const callback = () => {
+          // Verify WURFL.js was loaded without uach parameter
+          expect(loadExternalScriptStub.calledOnce).to.be.true;
+          const scriptUrl = loadExternalScriptStub.getCall(0).args[0];
+
+          const url = new URL(scriptUrl);
+          const uachParam = url.searchParams.get('uach');
+          expect(uachParam).to.be.null;
+
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, { params: {} }, {});
+      });
+    });
+
     // TTL handling tests
     describe('TTL handling', () => {
       it('should use valid (not expired) cached data without triggering async load', (done) => {

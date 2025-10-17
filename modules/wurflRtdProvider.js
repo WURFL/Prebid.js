@@ -7,6 +7,7 @@ import {
 } from '../src/utils.js';
 import { MODULE_TYPE_RTD } from '../src/activities/modules.js';
 import { getStorageManager } from '../src/storageManager.js';
+import { getGlobal } from '../src/prebidGlobal.js';
 
 // Constants
 const REAL_TIME_MODULE = 'realTimeData';
@@ -41,6 +42,15 @@ const ORTB2_DEVICE_FIELDS = [
   'h', 'w', 'ppi', 'pxratio', 'js'
 ];
 
+// Enrichment type constants
+const ENRICHMENT_TYPE = {
+  NONE: 'none',
+  LCE: 'lce',
+  WURFL_PUB: 'wurfl_pub',
+  WURFL_SSP: 'wurfl_ssp',
+  WURFL_PUB_SSP: 'wurfl_pub_ssp'
+};
+
 const logger = prefixLog('[WURFL RTD Submodule]');
 
 // Storage manager for WURFL RTD provider
@@ -52,6 +62,12 @@ export const storage = getStorageManager({
 // enrichedBidders holds a list of prebid bidder names, of bidders which have been
 // injected with WURFL data
 const enrichedBidders = new Set();
+
+// enrichmentType tracks the overall enrichment type used in the current auction
+let enrichmentType = ENRICHMENT_TYPE.NONE;
+
+// wurflId stores the WURFL ID from device data
+let wurflId = '';
 
 // WurflDebugger object for performance tracking and debugging
 const WurflDebugger = {
@@ -443,6 +459,12 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
     }
     enrichDeviceBidder(reqBidsConfigObj, bidders, wjsDevice);
 
+    // Set enrichment type to WURFL publisher caps
+    enrichmentType = ENRICHMENT_TYPE.WURFL_PUB;
+
+    // Store WURFL ID for analytics
+    wurflId = cachedWurflData.WURFL?.wurfl_id || '';
+
     // If expired, refresh cache async
     if (isExpired) {
       loadWurflJsAsync(config, bidders);
@@ -461,6 +483,9 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
   WurflDebugger.lceDetectionStop();
   WurflDebugger.setLceData(fpdDevice);
   enrichDeviceFPD(reqBidsConfigObj, fpdDevice);
+
+  // Set enrichment type to LCE
+  enrichmentType = ENRICHMENT_TYPE.LCE;
 
   // Load WURFL.js async for future requests
   loadWurflJsAsync(config, bidders);
@@ -486,11 +511,96 @@ function onAuctionEndEvent(auctionDetails, config, userConsent) {
   const url = new URL(host);
   url.pathname = STATS_ENDPOINT_PATH;
 
-  if (enrichedBidders.size === 0) {
+  // Only send beacon if there are bids to report
+  if (!auctionDetails.bidsReceived || auctionDetails.bidsReceived.length === 0) {
     return;
   }
 
-  var payload = JSON.stringify({ bidders: [...enrichedBidders] });
+  logger.logMessage(`onAuctionEndEvent: processing ${auctionDetails.bidsReceived.length} bid responses`);
+
+  // Build a lookup object for winning bid request IDs
+  const winningBids = getGlobal().getHighestCpmBids() || [];
+  const winningBidIds = {};
+  for (let i = 0; i < winningBids.length; i++) {
+    const bid = winningBids[i];
+    winningBidIds[bid.requestId] = true;
+  }
+
+  logger.logMessage(`onAuctionEndEvent: ${winningBids.length} winning bids identified`);
+
+  // Build a lookup object for bid responses: "adUnitCode:bidderCode" -> bid
+  const bidResponseMap = {};
+  for (let i = 0; i < auctionDetails.bidsReceived.length; i++) {
+    const bid = auctionDetails.bidsReceived[i];
+    const adUnitCode = bid.adUnitCode;
+    const bidderCode = bid.bidderCode || bid.bidder;
+    const key = adUnitCode + ':' + bidderCode;
+    bidResponseMap[key] = bid;
+  }
+
+  // Build ad units array with all bidders (including non-responders)
+  const adUnits = [];
+
+  if (auctionDetails.adUnits) {
+    for (let i = 0; i < auctionDetails.adUnits.length; i++) {
+      const adUnit = auctionDetails.adUnits[i];
+      const adUnitCode = adUnit.code;
+      const bidders = [];
+
+      // Check each bidder configured for this ad unit
+      for (let j = 0; j < adUnit.bids.length; j++) {
+        const bidConfig = adUnit.bids[j];
+        const bidderCode = bidConfig.bidder;
+        const key = adUnitCode + ':' + bidderCode;
+        const bidResponse = bidResponseMap[key];
+
+        if (bidResponse) {
+          // Bidder responded - include full data
+          const isWinner = winningBidIds[bidResponse.requestId] === true;
+          bidders.push({
+            bidder: bidderCode,
+            enrichment: enrichmentType,
+            cpm: bidResponse.cpm,
+            currency: bidResponse.currency,
+            won: isWinner
+          });
+        } else {
+          // Bidder didn't respond - include without cpm/currency
+          bidders.push({
+            bidder: bidderCode,
+            enrichment: enrichmentType,
+            won: false
+          });
+        }
+      }
+
+      adUnits.push({
+        ad_unit_code: adUnitCode,
+        bidders: bidders
+      });
+    }
+  }
+
+  // Count bidders for logging
+  let totalBidderEntries = 0;
+  for (let i = 0; i < adUnits.length; i++) {
+    totalBidderEntries += adUnits[i].bidders.length;
+  }
+  const respondedBidders = auctionDetails.bidsReceived.length;
+  const nonRespondingBidders = totalBidderEntries - respondedBidders;
+
+  logger.logMessage(`onAuctionEndEvent: built ${adUnits.length} ad units with ${totalBidderEntries} total bidder entries (${respondedBidders} responded, ${nonRespondingBidders} non-responding)`);
+
+  // Build complete payload
+  const payload = JSON.stringify({
+    domain: typeof window !== 'undefined' ? window.location.hostname : '',
+    path: typeof window !== 'undefined' ? window.location.pathname : '',
+    sampling_rate: config.params?.samplingRate || 100,
+    enrichment: enrichmentType,
+    wurfl_id: wurflId,
+    ad_units: adUnits
+  });
+
   const sentBeacon = sendBeacon(url.toString(), payload);
   if (sentBeacon) {
     return;

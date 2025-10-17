@@ -4,6 +4,7 @@ import {
 } from 'modules/wurflRtdProvider';
 import * as ajaxModule from 'src/ajax';
 import { loadExternalScriptStub } from 'test/mocks/adloaderStub.js';
+import * as prebidGlobalModule from 'src/prebidGlobal.js';
 
 describe('wurflRtdProvider', function () {
   describe('wurflSubmodule', function () {
@@ -577,19 +578,69 @@ describe('wurflRtdProvider', function () {
       sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
       sandbox.stub(storage, 'hasLocalStorage').returns(true);
 
-      const sendBeaconStub = sandbox.stub(navigator, 'sendBeacon');
+      const sendBeaconStub = sandbox.stub(navigator, 'sendBeacon').returns(true);
+
+      // Mock getGlobal().getHighestCpmBids()
+      const mockHighestCpmBids = [
+        { requestId: 'req1', bidderCode: 'bidder1', adUnitCode: 'ad1' }
+      ];
+      sandbox.stub(prebidGlobalModule, 'getGlobal').returns({
+        getHighestCpmBids: () => mockHighestCpmBids
+      });
 
       const callback = () => {
-        // Now call onAuctionEndEvent with enriched bidders
-        const auctionDetails = {};
-        const config = {};
+        // Build auctionDetails with bidsReceived and adUnits
+        const auctionDetails = {
+          bidsReceived: [
+            { requestId: 'req1', bidderCode: 'bidder1', adUnitCode: 'ad1', cpm: 1.5, currency: 'USD' },
+            { requestId: 'req2', bidderCode: 'bidder2', adUnitCode: 'ad1', cpm: 1.2, currency: 'USD' }
+          ],
+          adUnits: [
+            {
+              code: 'ad1',
+              bids: [
+                { bidder: 'bidder1' },
+                { bidder: 'bidder2' }
+              ]
+            }
+          ]
+        };
+        const config = { params: {} };
         const userConsent = {};
 
         wurflSubmodule.onAuctionEndEvent(auctionDetails, config, userConsent);
 
         // Assertions
         expect(sendBeaconStub.calledOnce).to.be.true;
-        expect(sendBeaconStub.calledWithExactly(expectedStatsURL, expectedData)).to.be.true;
+        const beaconCall = sendBeaconStub.getCall(0);
+        expect(beaconCall.args[0]).to.equal(expectedStatsURL);
+
+        // Parse and verify payload structure
+        const payload = JSON.parse(beaconCall.args[1]);
+        expect(payload).to.have.property('domain');
+        expect(payload).to.have.property('path');
+        expect(payload).to.have.property('sampling_rate', 100);
+        expect(payload).to.have.property('enrichment', 'wurfl_pub');
+        expect(payload).to.have.property('wurfl_id', 'lg_nexus5_ver1');
+        expect(payload).to.have.property('ad_units');
+        expect(payload.ad_units).to.be.an('array').with.lengthOf(1);
+        expect(payload.ad_units[0].ad_unit_code).to.equal('ad1');
+        expect(payload.ad_units[0].bidders).to.be.an('array').with.lengthOf(2);
+        expect(payload.ad_units[0].bidders[0]).to.deep.include({
+          bidder: 'bidder1',
+          enrichment: 'wurfl_pub',
+          cpm: 1.5,
+          currency: 'USD',
+          won: true
+        });
+        expect(payload.ad_units[0].bidders[1]).to.deep.include({
+          bidder: 'bidder2',
+          enrichment: 'wurfl_pub',
+          cpm: 1.2,
+          currency: 'USD',
+          won: false
+        });
+
         done();
       };
 
@@ -614,10 +665,32 @@ describe('wurflRtdProvider', function () {
       const sendBeaconStub = sandbox.stub(ajaxModule, 'sendBeacon').returns(false);
       const fetchAjaxStub = sandbox.stub(ajaxModule, 'fetch');
 
+      // Mock getGlobal().getHighestCpmBids()
+      const mockHighestCpmBids = [
+        { requestId: 'req1', bidderCode: 'bidder1', adUnitCode: 'ad1' }
+      ];
+      sandbox.stub(prebidGlobalModule, 'getGlobal').returns({
+        getHighestCpmBids: () => mockHighestCpmBids
+      });
+
       const callback = () => {
-        // Now call onAuctionEndEvent with enriched bidders
-        const auctionDetails = {};
-        const config = {};
+        // Build auctionDetails with bidsReceived and adUnits
+        const auctionDetails = {
+          bidsReceived: [
+            { requestId: 'req1', bidderCode: 'bidder1', adUnitCode: 'ad1', cpm: 1.5, currency: 'USD' },
+            { requestId: 'req2', bidderCode: 'bidder2', adUnitCode: 'ad1', cpm: 1.2, currency: 'USD' }
+          ],
+          adUnits: [
+            {
+              code: 'ad1',
+              bids: [
+                { bidder: 'bidder1' },
+                { bidder: 'bidder2' }
+              ]
+            }
+          ]
+        };
+        const config = { params: {} };
         const userConsent = {};
 
         wurflSubmodule.onAuctionEndEvent(auctionDetails, config, userConsent);
@@ -629,8 +702,18 @@ describe('wurflRtdProvider', function () {
         const fetchAjaxCall = fetchAjaxStub.getCall(0);
         expect(fetchAjaxCall.args[0]).to.equal(expectedStatsURL);
         expect(fetchAjaxCall.args[1].method).to.equal('POST');
-        expect(fetchAjaxCall.args[1].body).to.equal(expectedData);
         expect(fetchAjaxCall.args[1].mode).to.equal('no-cors');
+
+        // Parse and verify payload structure
+        const payload = JSON.parse(fetchAjaxCall.args[1].body);
+        expect(payload).to.have.property('domain');
+        expect(payload).to.have.property('path');
+        expect(payload).to.have.property('sampling_rate', 100);
+        expect(payload).to.have.property('enrichment', 'wurfl_pub');
+        expect(payload).to.have.property('wurfl_id', 'lg_nexus5_ver1');
+        expect(payload).to.have.property('ad_units');
+        expect(payload.ad_units).to.be.an('array').with.lengthOf(1);
+
         done();
       };
 

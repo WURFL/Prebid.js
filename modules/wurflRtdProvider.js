@@ -586,7 +586,14 @@ function getConsentClass(userConsent) {
  */
 function onAuctionEndEvent(auctionDetails, config, userConsent) {
 
-  const url = new URL(STATS_HOST);
+  const statsHost = config.params?.statsHost ?? null;
+
+  let host = STATS_HOST;
+  if (statsHost) {
+    host = statsHost;
+  }
+
+  const url = new URL(host);
   url.pathname = STATS_ENDPOINT_PATH;
 
   // Only send beacon if there are bids to report

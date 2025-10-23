@@ -17,8 +17,10 @@ const MODULE_NAME = 'wurfl';
 const WURFL_JS_HOST = 'https://prebid.wurflcloud.com';
 // WURFL_JS_ENDPOINT_PATH is the path for the WURFL.js endpoint used to load WURFL data
 const WURFL_JS_ENDPOINT_PATH = '/wurfl.js';
+// STATS_HOST is the host for the WURFL stats endpoint
+const STATS_HOST = 'https://stats.prebid.wurflcloud.com'
 // STATS_ENDPOINT_PATH is the path for the stats endpoint used to send analytics data
-const STATS_ENDPOINT_PATH = '/v1/prebid/stats';
+const STATS_ENDPOINT_PATH = '/v2/prebid/stats';
 
 // Storage keys for localStorage caching
 const WURFL_RTD_STORAGE_KEY = 'wurflrtd';
@@ -584,14 +586,7 @@ function getConsentClass(userConsent) {
  */
 function onAuctionEndEvent(auctionDetails, config, userConsent) {
 
-  const altHost = config.params?.altHost ?? null;
-
-  let host = WURFL_JS_HOST;
-  if (altHost) {
-    host = altHost;
-  }
-
-  const url = new URL(host);
+  const url = new URL(STATS_HOST);
   url.pathname = STATS_ENDPOINT_PATH;
 
   // Only send beacon if there are bids to report

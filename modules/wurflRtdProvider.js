@@ -51,6 +51,13 @@ const ENRICHMENT_TYPE = {
   WURFL_PUB_SSP: 'wurfl_pub_ssp'
 };
 
+// Consent class constants
+const CONSENT_CLASS = {
+  NO: 0,        // No consent/opt-out/COPPA
+  PARTIAL: 1,   // Partial or ambiguous
+  FULL: 2       // Full consent or non-GDPR region
+};
+
 const logger = prefixLog('[WURFL RTD Submodule]');
 
 // Storage manager for WURFL RTD provider
@@ -495,12 +502,88 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
 }
 
 /**
+ * getConsentClass calculates the consent classification level
+ * @param {Object} userConsent User consent data
+ * @returns {number} Consent class (0, 1, or 2)
+ */
+function getConsentClass(userConsent) {
+  // Default to no consent if userConsent is not provided or is an empty object
+  if (!userConsent || Object.keys(userConsent).length === 0) {
+    return CONSENT_CLASS.NO;
+  }
+
+  // Check COPPA (Children's Privacy)
+  if (userConsent.coppa === true) {
+    return CONSENT_CLASS.NO;
+  }
+
+  // Check USP/CCPA (US Privacy)
+  if (userConsent.usp && typeof userConsent.usp === 'string') {
+    if (userConsent.usp.substring(0, 2) === '1Y') {
+      return CONSENT_CLASS.NO;
+    }
+  }
+
+
+  // Check GDPR object exists
+  if (!userConsent.gdpr) {
+    return CONSENT_CLASS.FULL; // No GDPR data means not applicable
+  }
+
+  // Check GDPR applicability - Note: might be in vendorData
+  const gdprApplies = userConsent.gdpr.gdprApplies === true || userConsent.gdpr.vendorData?.gdprApplies === true;
+
+  if (!gdprApplies) {
+    return CONSENT_CLASS.FULL;
+  }
+
+  // GDPR applies - evaluate purposes
+  const vendorData = userConsent.gdpr.vendorData;
+
+  if (!vendorData || !vendorData.purpose) {
+    return CONSENT_CLASS.NO;
+  }
+
+  const purposes = vendorData.purpose;
+  const consents = purposes.consents || {};
+  const legitimateInterests = purposes.legitimateInterests || {};
+
+  // Count allowed purposes (7, 8, 10)
+  let allowedCount = 0;
+
+  // Purpose 7: Measure ad performance
+  if (consents['7'] === true || legitimateInterests['7'] === true) {
+    allowedCount++;
+  }
+
+  // Purpose 8: Market research
+  if (consents['8'] === true || legitimateInterests['8'] === true) {
+    allowedCount++;
+  }
+
+  // Purpose 10: Develop/improve products
+  if (consents['10'] === true || legitimateInterests['10'] === true) {
+    allowedCount++;
+  }
+
+  // Classify based on allowed purposes count
+  if (allowedCount === 0) {
+    return CONSENT_CLASS.NO;
+  }
+  if (allowedCount === 3) {
+    return CONSENT_CLASS.FULL;
+  }
+  return CONSENT_CLASS.PARTIAL;
+}
+
+/**
  * onAuctionEndEvent is called when the auction ends
  * @param {Object} auctionDetails Auction details
  * @param {Object} config Configuration for WURFL RTD submodule
  * @param {Object} userConsent User consent data
  */
 function onAuctionEndEvent(auctionDetails, config, userConsent) {
+
   const altHost = config.params?.altHost ?? null;
 
   let host = WURFL_JS_HOST;
@@ -591,6 +674,9 @@ function onAuctionEndEvent(auctionDetails, config, userConsent) {
 
   logger.logMessage(`onAuctionEndEvent: built ${adUnits.length} ad units with ${totalBidderEntries} total bidder entries (${respondedBidders} responded, ${nonRespondingBidders} non-responding)`);
 
+  // Calculate consent class
+  const consentClass = getConsentClass(userConsent);
+
   // Build complete payload
   const payload = JSON.stringify({
     domain: typeof window !== 'undefined' ? window.location.hostname : '',
@@ -598,6 +684,7 @@ function onAuctionEndEvent(auctionDetails, config, userConsent) {
     sampling_rate: config.params?.samplingRate || 100,
     enrichment: enrichmentType,
     wurfl_id: wurflId,
+    consent_class: consentClass,
     ad_units: adUnits
   });
 

@@ -622,6 +622,7 @@ describe('wurflRtdProvider', function () {
         expect(payload).to.have.property('sampling_rate', 100);
         expect(payload).to.have.property('enrichment', 'wurfl_pub');
         expect(payload).to.have.property('wurfl_id', 'lg_nexus5_ver1');
+        expect(payload).to.have.property('consent_class', 0);
         expect(payload).to.have.property('ad_units');
         expect(payload.ad_units).to.be.an('array').with.lengthOf(1);
         expect(payload.ad_units[0].ad_unit_code).to.equal('ad1');
@@ -711,6 +712,7 @@ describe('wurflRtdProvider', function () {
         expect(payload).to.have.property('sampling_rate', 100);
         expect(payload).to.have.property('enrichment', 'wurfl_pub');
         expect(payload).to.have.property('wurfl_id', 'lg_nexus5_ver1');
+        expect(payload).to.have.property('consent_class', 0);
         expect(payload).to.have.property('ad_units');
         expect(payload.ad_units).to.be.an('array').with.lengthOf(1);
 
@@ -722,6 +724,171 @@ describe('wurflRtdProvider', function () {
 
       // First enrich bidders to populate enrichedBidders Set
       wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, userConsent);
+    });
+
+    describe('consent classification', () => {
+      beforeEach(function () {
+        // Setup localStorage with cached WURFL data
+        const cachedData = { WURFL, wurfl_pbjs };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        // Mock getGlobal().getHighestCpmBids()
+        sandbox.stub(prebidGlobalModule, 'getGlobal').returns({
+          getHighestCpmBids: () => []
+        });
+
+        // Reset reqBidsConfigObj
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+      });
+
+      const testConsentClass = (description, userConsent, expectedClass, done) => {
+        const sendBeaconStub = sandbox.stub(ajaxModule, 'sendBeacon').returns(true);
+
+        const callback = () => {
+          const auctionDetails = {
+            bidsReceived: [
+              { requestId: 'req1', bidderCode: 'bidder1', adUnitCode: 'ad1', cpm: 1.5, currency: 'USD' }
+            ],
+            adUnits: [
+              {
+                code: 'ad1',
+                bids: [{ bidder: 'bidder1' }]
+              }
+            ]
+          };
+          const config = { params: {} };
+
+          wurflSubmodule.onAuctionEndEvent(auctionDetails, config, userConsent);
+
+          expect(sendBeaconStub.calledOnce).to.be.true;
+          const beaconCall = sendBeaconStub.getCall(0);
+          const payload = JSON.parse(beaconCall.args[1]);
+          expect(payload).to.have.property('consent_class', expectedClass);
+          done();
+        };
+
+        const config = { params: {} };
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, {});
+      };
+
+      it('should return NO consent (0) when userConsent is null', (done) => {
+        testConsentClass('null userConsent', null, 0, done);
+      });
+
+      it('should return NO consent (0) when userConsent is empty object', (done) => {
+        testConsentClass('empty object', {}, 0, done);
+      });
+
+      it('should return NO consent (0) when COPPA is enabled', (done) => {
+        testConsentClass('COPPA enabled', { coppa: true }, 0, done);
+      });
+
+      it('should return NO consent (0) when USP opt-out (1Y)', (done) => {
+        testConsentClass('USP opt-out', { usp: '1YYN' }, 0, done);
+      });
+
+      it('should return NO consent (0) when GDPR applies but no purposes granted', (done) => {
+        const userConsent = {
+          gdpr: {
+            gdprApplies: true,
+            vendorData: {
+              purpose: {
+                consents: {},
+                legitimateInterests: {}
+              }
+            }
+          }
+        };
+        testConsentClass('GDPR no purposes', userConsent, 0, done);
+      });
+
+      it('should return FULL consent (2) when no GDPR object (non-GDPR region)', (done) => {
+        testConsentClass('no GDPR object', { usp: '1NNN' }, 2, done);
+      });
+
+      it('should return FULL consent (2) when GDPR does not apply', (done) => {
+        const userConsent = {
+          gdpr: {
+            gdprApplies: false
+          }
+        };
+        testConsentClass('GDPR not applicable', userConsent, 2, done);
+      });
+
+      it('should return FULL consent (2) when all 3 GDPR purposes granted via consents', (done) => {
+        const userConsent = {
+          gdpr: {
+            gdprApplies: true,
+            vendorData: {
+              purpose: {
+                consents: { 7: true, 8: true, 10: true }
+              }
+            }
+          }
+        };
+        testConsentClass('all purposes via consents', userConsent, 2, done);
+      });
+
+      it('should return FULL consent (2) when all 3 GDPR purposes granted via legitimateInterests', (done) => {
+        const userConsent = {
+          gdpr: {
+            gdprApplies: true,
+            vendorData: {
+              purpose: {
+                legitimateInterests: { 7: true, 8: true, 10: true }
+              }
+            }
+          }
+        };
+        testConsentClass('all purposes via LI', userConsent, 2, done);
+      });
+
+      it('should return FULL consent (2) when all 3 GDPR purposes granted via mixed consents and LI', (done) => {
+        const userConsent = {
+          gdpr: {
+            gdprApplies: true,
+            vendorData: {
+              purpose: {
+                consents: { 7: true, 10: true },
+                legitimateInterests: { 8: true }
+              }
+            }
+          }
+        };
+        testConsentClass('mixed consents and LI', userConsent, 2, done);
+      });
+
+      it('should return PARTIAL consent (1) when only 1 GDPR purpose granted', (done) => {
+        const userConsent = {
+          gdpr: {
+            gdprApplies: true,
+            vendorData: {
+              purpose: {
+                consents: { 7: true }
+              }
+            }
+          }
+        };
+        testConsentClass('1 purpose granted', userConsent, 1, done);
+      });
+
+      it('should return PARTIAL consent (1) when 2 GDPR purposes granted', (done) => {
+        const userConsent = {
+          gdpr: {
+            gdprApplies: true,
+            vendorData: {
+              purpose: {
+                consents: { 7: true },
+                legitimateInterests: { 8: true }
+              }
+            }
+          }
+        };
+        testConsentClass('2 purposes granted', userConsent, 1, done);
+      });
     });
 
     describe('device type mapping', () => {

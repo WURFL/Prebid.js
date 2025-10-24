@@ -123,7 +123,10 @@ const WurflDebugger = {
 
           // When dataSource = 'lce'
           lceDevice: null       // The LCE-generated device object
-        }
+        },
+
+        // Beacon payload sent to analytics endpoint
+        beaconPayload: null
       };
     }
   },
@@ -216,6 +219,10 @@ const WurflDebugger = {
 
   setCacheExpired(expired) {
     window.WurflRtdDebug.cacheExpired = expired;
+  },
+
+  setBeaconPayload(payload) {
+    window.WurflRtdDebug.beaconPayload = payload;
   }
 };
 
@@ -692,6 +699,7 @@ function onAuctionEndEvent(auctionDetails, config, userConsent) {
 
   const sentBeacon = sendBeacon(url.toString(), payload);
   if (sentBeacon) {
+    WurflDebugger.setBeaconPayload(JSON.parse(payload));
     return;
   }
 
@@ -701,6 +709,8 @@ function onAuctionEndEvent(auctionDetails, config, userConsent) {
     mode: 'no-cors',
     keepalive: true
   });
+
+  WurflDebugger.setBeaconPayload(JSON.parse(payload));
 }
 
 // The WURFL submodule

@@ -13,6 +13,7 @@ describe('wurflRtdProvider', function () {
     const wurfl_pbjs = {
       caps: ['wurfl_id', 'advertised_browser', 'advertised_browser_version', 'advertised_device_os', 'advertised_device_os_version', 'ajax_support_javascript', 'brand_name', 'complete_device_name', 'density_class', 'form_factor', 'is_android', 'is_app_webview', 'is_connected_tv', 'is_full_desktop', 'is_ios', 'is_mobile', 'is_ott', 'is_phone', 'is_robot', 'is_smartphone', 'is_smarttv', 'is_tablet', 'manufacturer_name', 'marketing_name', 'max_image_height', 'max_image_width', 'model_name', 'physical_screen_height', 'physical_screen_width', 'pixel_density', 'pointing_method', 'resolution_height', 'resolution_width'],
       over_quota: 0,
+      sampling_rate: 100,
       global: {
         basic_set: {
           cap_indices: [0, 9, 15, 16, 17, 18, 32]
@@ -67,7 +68,7 @@ describe('wurflRtdProvider', function () {
     };
 
     // expected analytics values
-    const expectedStatsURL = 'https://prebid.wurflcloud.com/v1/prebid/stats';
+    const expectedStatsURL = 'https://stats.prebid.wurflcloud.com/v2/prebid/stats';
     const expectedData = JSON.stringify({ bidders: ['bidder1', 'bidder2'] });
 
     let sandbox;
@@ -81,6 +82,8 @@ describe('wurflRtdProvider', function () {
         complete: new Promise(function (resolve, reject) { resolve({ WURFL, wurfl_pbjs }) }),
       };
       originalUAData = window.navigator.userAgentData;
+      // Initialize module with clean state for each test
+      wurflSubmodule.init({ params: {} });
     });
 
     afterEach(() => {
@@ -333,10 +336,10 @@ describe('wurflRtdProvider', function () {
         expect(wurflSubmodule.init(config)).to.be.true;
       });
 
-      it('should return false for users in control group (random >= abSplit)', () => {
+      it('should return true for users in control group (random >= abSplit)', () => {
         sandbox.stub(Math, 'random').returns(0.75); // 75% -> random value = 75
         const config = { params: { abTest: true, abName: 'test_sept', abSplit: 50 } };
-        expect(wurflSubmodule.init(config)).to.be.false;
+        expect(wurflSubmodule.init(config)).to.be.true;
       });
 
       it('should use default abSplit of 50 when not specified', () => {
@@ -348,13 +351,123 @@ describe('wurflRtdProvider', function () {
       it('should handle abSplit of 0 (all control)', () => {
         sandbox.stub(Math, 'random').returns(0.01); // 1% -> random value = 1
         const config = { params: { abTest: true, abName: 'test_sept', abSplit: 0 } };
-        expect(wurflSubmodule.init(config)).to.be.false;
+        expect(wurflSubmodule.init(config)).to.be.true;
       });
 
       it('should handle abSplit of 100 (all treatment)', () => {
         sandbox.stub(Math, 'random').returns(0.99); // 99% -> random value = 99
         const config = { params: { abTest: true, abName: 'test_sept', abSplit: 100 } };
         expect(wurflSubmodule.init(config)).to.be.true;
+      });
+
+      it('should skip enrichment for control group in getBidRequestData', (done) => {
+        sandbox.stub(Math, 'random').returns(0.75); // Control group
+        const config = { params: { abTest: true, abName: 'test_sept', abSplit: 50 } };
+
+        // Initialize with A/B test config
+        wurflSubmodule.init(config);
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          // Control group should not enrich
+          expect(reqBidsConfigObj.ortb2Fragments.global.device).to.deep.equal({});
+          expect(reqBidsConfigObj.ortb2Fragments.bidder).to.deep.equal({});
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, {});
+      });
+
+      it('should send beacon with ab_name and ab_variant for treatment group', (done) => {
+        sandbox.stub(Math, 'random').returns(0.25); // Treatment group
+        const config = { params: { abTest: true, abName: 'test_sept', abSplit: 50 } };
+
+        // Initialize with A/B test config
+        wurflSubmodule.init(config);
+
+        const cachedData = { WURFL, wurfl_pbjs };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        const sendBeaconStub = sandbox.stub(ajaxModule, 'sendBeacon').returns(true);
+
+        sandbox.stub(prebidGlobalModule, 'getGlobal').returns({
+          getHighestCpmBids: () => []
+        });
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          const auctionDetails = {
+            bidsReceived: [
+              { requestId: 'req1', bidderCode: 'bidder1', adUnitCode: 'ad1', cpm: 1.5, currency: 'USD' }
+            ],
+            adUnits: [
+              {
+                code: 'ad1',
+                bids: [{ bidder: 'bidder1' }]
+              }
+            ]
+          };
+
+          wurflSubmodule.onAuctionEndEvent(auctionDetails, config, null);
+
+          expect(sendBeaconStub.calledOnce).to.be.true;
+          const beaconCall = sendBeaconStub.getCall(0);
+          const payload = JSON.parse(beaconCall.args[1]);
+          expect(payload).to.have.property('ab_name', 'test_sept');
+          expect(payload).to.have.property('ab_variant', 'treatment');
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, {});
+      });
+
+      it('should send beacon with ab_name and ab_variant for control group', (done) => {
+        sandbox.stub(Math, 'random').returns(0.75); // Control group
+        const config = { params: { abTest: true, abName: 'test_sept', abSplit: 50 } };
+
+        // Initialize with A/B test config
+        wurflSubmodule.init(config);
+
+        const sendBeaconStub = sandbox.stub(ajaxModule, 'sendBeacon').returns(true);
+
+        sandbox.stub(prebidGlobalModule, 'getGlobal').returns({
+          getHighestCpmBids: () => []
+        });
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          const auctionDetails = {
+            bidsReceived: [
+              { requestId: 'req1', bidderCode: 'bidder1', adUnitCode: 'ad1', cpm: 1.5, currency: 'USD' }
+            ],
+            adUnits: [
+              {
+                code: 'ad1',
+                bids: [{ bidder: 'bidder1' }]
+              }
+            ]
+          };
+
+          wurflSubmodule.onAuctionEndEvent(auctionDetails, config, null);
+
+          expect(sendBeaconStub.calledOnce).to.be.true;
+          const beaconCall = sendBeaconStub.getCall(0);
+          const payload = JSON.parse(beaconCall.args[1]);
+          expect(payload).to.have.property('ab_name', 'test_sept');
+          expect(payload).to.have.property('ab_variant', 'control');
+          expect(payload).to.have.property('enrichment', 'none');
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, {});
       });
     });
 
@@ -888,6 +1001,144 @@ describe('wurflRtdProvider', function () {
           }
         };
         testConsentClass('2 purposes granted', userConsent, 1, done);
+      });
+    });
+
+    describe('sampling rate', () => {
+      it('should not send beacon when sampling_rate is 0', (done) => {
+        // Setup WURFL data with sampling_rate: 0
+        const wurfl_pbjs_zero_sampling = { ...wurfl_pbjs, sampling_rate: 0 };
+        const cachedData = { WURFL, wurfl_pbjs: wurfl_pbjs_zero_sampling };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        const sendBeaconStub = sandbox.stub(ajaxModule, 'sendBeacon');
+        const fetchStub = sandbox.stub(ajaxModule, 'fetch');
+
+        sandbox.stub(prebidGlobalModule, 'getGlobal').returns({
+          getHighestCpmBids: () => []
+        });
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          const auctionDetails = {
+            bidsReceived: [
+              { requestId: 'req1', bidderCode: 'bidder1', adUnitCode: 'ad1', cpm: 1.5, currency: 'USD' }
+            ],
+            adUnits: [
+              {
+                code: 'ad1',
+                bids: [{ bidder: 'bidder1' }]
+              }
+            ]
+          };
+          const config = { params: {} };
+          const userConsent = null;
+
+          wurflSubmodule.onAuctionEndEvent(auctionDetails, config, userConsent);
+
+          // Beacon should NOT be sent due to sampling_rate: 0
+          expect(sendBeaconStub.called).to.be.false;
+          expect(fetchStub.called).to.be.false;
+          done();
+        };
+
+        const config = { params: {} };
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, {});
+      });
+
+      it('should send beacon when sampling_rate is 100', (done) => {
+        // Setup WURFL data with sampling_rate: 100
+        const wurfl_pbjs_full_sampling = { ...wurfl_pbjs, sampling_rate: 100 };
+        const cachedData = { WURFL, wurfl_pbjs: wurfl_pbjs_full_sampling };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        const sendBeaconStub = sandbox.stub(ajaxModule, 'sendBeacon').returns(true);
+
+        sandbox.stub(prebidGlobalModule, 'getGlobal').returns({
+          getHighestCpmBids: () => []
+        });
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          const auctionDetails = {
+            bidsReceived: [
+              { requestId: 'req1', bidderCode: 'bidder1', adUnitCode: 'ad1', cpm: 1.5, currency: 'USD' }
+            ],
+            adUnits: [
+              {
+                code: 'ad1',
+                bids: [{ bidder: 'bidder1' }]
+              }
+            ]
+          };
+          const config = { params: {} };
+          const userConsent = null;
+
+          wurflSubmodule.onAuctionEndEvent(auctionDetails, config, userConsent);
+
+          // Beacon should be sent
+          expect(sendBeaconStub.calledOnce).to.be.true;
+          const beaconCall = sendBeaconStub.getCall(0);
+          const payload = JSON.parse(beaconCall.args[1]);
+          expect(payload).to.have.property('sampling_rate', 100);
+          done();
+        };
+
+        const config = { params: {} };
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, {});
+      });
+
+      it('should use default sampling_rate (100) for LCE and send beacon', (done) => {
+        // No cached data - will use LCE
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(null);
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        const sendBeaconStub = sandbox.stub(ajaxModule, 'sendBeacon').returns(true);
+
+        sandbox.stub(prebidGlobalModule, 'getGlobal').returns({
+          getHighestCpmBids: () => []
+        });
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          const auctionDetails = {
+            bidsReceived: [
+              { requestId: 'req1', bidderCode: 'bidder1', adUnitCode: 'ad1', cpm: 1.5, currency: 'USD' }
+            ],
+            adUnits: [
+              {
+                code: 'ad1',
+                bids: [{ bidder: 'bidder1' }]
+              }
+            ]
+          };
+          const config = { params: {} };
+          const userConsent = null;
+
+          wurflSubmodule.onAuctionEndEvent(auctionDetails, config, userConsent);
+
+          // Beacon should be sent with default sampling_rate
+          expect(sendBeaconStub.calledOnce).to.be.true;
+          const beaconCall = sendBeaconStub.getCall(0);
+          const payload = JSON.parse(beaconCall.args[1]);
+          expect(payload).to.have.property('sampling_rate', 100);
+          expect(payload).to.have.property('enrichment', 'lce');
+          done();
+        };
+
+        const config = { params: {} };
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, {});
       });
     });
 

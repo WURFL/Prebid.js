@@ -60,6 +60,17 @@ const CONSENT_CLASS = {
   FULL: 2       // Full consent or non-GDPR region
 };
 
+// Default sampling rate constant
+const DEFAULT_SAMPLING_RATE = 100;
+
+// A/B test constants
+const AB_TEST = {
+  CONTROL_GROUP: 'control',
+  TREATMENT_GROUP: 'treatment',
+  DEFAULT_SPLIT: 50,
+  DEFAULT_NAME: 'unknown'
+};
+
 const logger = prefixLog('[WURFL RTD Submodule]');
 
 // Storage manager for WURFL RTD provider
@@ -77,6 +88,12 @@ let enrichmentType = ENRICHMENT_TYPE.NONE;
 
 // wurflId stores the WURFL ID from device data
 let wurflId = '';
+
+// samplingRate tracks the beacon sampling rate (0-100)
+let samplingRate = DEFAULT_SAMPLING_RATE;
+
+// abTest stores A/B test configuration and variant (set by init)
+let abTest;
 
 // WurflDebugger object for performance tracking and debugging
 const WurflDebugger = {
@@ -403,6 +420,22 @@ function loadWurflJsAsync(config, bidders) {
 }
 
 /**
+ * shouldSample determines if an action should be taken based on sampling rate
+ * @param {number} rate Sampling rate from 0-100 (percentage)
+ * @returns {boolean} True if should proceed, false if should skip
+ */
+function shouldSample(rate) {
+  if (rate >= 100) {
+    return true;
+  }
+  if (rate <= 0) {
+    return false;
+  }
+  const randomValue = Math.floor(Math.random() * 100);
+  return randomValue < rate;
+}
+
+/**
  * init initializes the WURFL RTD submodule
  * @param {Object} config Configuration for WURFL RTD submodule
  * @param {Object} userConsent User consent data
@@ -412,28 +445,20 @@ const init = (config, userConsent) => {
   const isDebug = config?.params?.debug ?? false;
   WurflDebugger.init(isDebug);
 
-  // A/B testing: early return if not enabled
-  const abTest = config?.params?.abTest ?? false;
-  if (!abTest) {
-    logger.logMessage('initialized');
-    return true;
+  // A/B testing: reset state, then set if enabled
+  abTest = null;
+  const abTestEnabled = config?.params?.abTest ?? false;
+  if (abTestEnabled) {
+    const ab_name = config?.params?.abName ?? AB_TEST.DEFAULT_NAME;
+    const abSplit = config?.params?.abSplit ?? AB_TEST.DEFAULT_SPLIT;
+    const isInTreatment = shouldSample(abSplit);
+    const ab_variant = isInTreatment ? AB_TEST.TREATMENT_GROUP : AB_TEST.CONTROL_GROUP;
+    abTest = { ab_name, ab_variant };
+    logger.logMessage(`A/B test "${ab_name}": user in ${ab_variant} group`);
   }
 
-  // A/B testing enabled - determine treatment vs control
-  const abName = config?.params?.abName ?? 'unknown';
-  const abSplit = config?.params?.abSplit ?? 50;
-
-  const randomValue = Math.floor(Math.random() * 100);
-  const isInTreatment = randomValue < abSplit;
-
-  if (isInTreatment) {
-    logger.logMessage(`A/B test "${abName}": user in treatment group (enabled)`);
-    return true;
-  }
-
-  // User is in control group - disable module
-  logger.logMessage(`A/B test "${abName}": user in control group (disabled)`);
-  return false;
+  logger.logMessage('initialized');
+  return true;
 }
 
 /**
@@ -454,6 +479,15 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
       bidders.add(bid.bidder);
     });
   });
+
+  // A/B test: Skip enrichment for control group but allow beacon sending
+  if (abTest && abTest.ab_variant === AB_TEST.CONTROL_GROUP) {
+    logger.logMessage('A/B test control group: skipping enrichment');
+    enrichmentType = ENRICHMENT_TYPE.NONE;
+    WurflDebugger.moduleExecutionStop();
+    callback();
+    return;
+  }
 
   // Priority 1: Check if WURFL.js response is cached
   WurflDebugger.cacheReadStart();
@@ -481,6 +515,9 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
     // Store WURFL ID for analytics
     wurflId = cachedWurflData.WURFL?.wurfl_id || '';
 
+    // Store sampling rate for beacon
+    samplingRate = cachedWurflData.wurfl_pbjs?.sampling_rate ?? DEFAULT_SAMPLING_RATE;
+
     // If expired, refresh cache async
     if (isExpired) {
       loadWurflJsAsync(config, bidders);
@@ -502,6 +539,9 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
 
   // Set enrichment type to LCE
   enrichmentType = ENRICHMENT_TYPE.LCE;
+
+  // Set default sampling rate for LCE
+  samplingRate = DEFAULT_SAMPLING_RATE;
 
   // Load WURFL.js async for future requests
   loadWurflJsAsync(config, bidders);
@@ -592,6 +632,12 @@ function getConsentClass(userConsent) {
  * @param {Object} userConsent User consent data
  */
 function onAuctionEndEvent(auctionDetails, config, userConsent) {
+
+  // Apply sampling
+  if (!shouldSample(samplingRate)) {
+    logger.logMessage(`beacon skipped due to sampling (rate: ${samplingRate}%)`);
+    return;
+  }
 
   const statsHost = config.params?.statsHost ?? null;
 
@@ -687,15 +733,23 @@ function onAuctionEndEvent(auctionDetails, config, userConsent) {
   const consentClass = getConsentClass(userConsent);
 
   // Build complete payload
-  const payload = JSON.stringify({
+  const payloadData = {
     domain: typeof window !== 'undefined' ? window.location.hostname : '',
     path: typeof window !== 'undefined' ? window.location.pathname : '',
-    sampling_rate: config.params?.samplingRate || 100,
+    sampling_rate: samplingRate,
     enrichment: enrichmentType,
     wurfl_id: wurflId,
     consent_class: consentClass,
     ad_units: adUnits
-  });
+  };
+
+  // Add A/B test fields if enabled
+  if (abTest) {
+    payloadData.ab_name = abTest.ab_name;
+    payloadData.ab_variant = abTest.ab_variant;
+  }
+
+  const payload = JSON.stringify(payloadData);
 
   const sentBeacon = sendBeacon(url.toString(), payload);
   if (sentBeacon) {

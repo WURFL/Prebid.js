@@ -742,14 +742,14 @@ describe('wurflRtdProvider', function () {
         expect(payload.ad_units[0].bidders).to.be.an('array').with.lengthOf(2);
         expect(payload.ad_units[0].bidders[0]).to.deep.include({
           bidder: 'bidder1',
-          enrichment: 'wurfl_pub',
+          enrichment: 'wurfl_ssp',
           cpm: 1.5,
           currency: 'USD',
           won: true
         });
         expect(payload.ad_units[0].bidders[1]).to.deep.include({
           bidder: 'bidder2',
-          enrichment: 'wurfl_pub',
+          enrichment: 'wurfl_ssp',
           cpm: 1.2,
           currency: 'USD',
           won: false
@@ -1139,6 +1139,162 @@ describe('wurflRtdProvider', function () {
 
         const config = { params: {} };
         wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, {});
+      });
+    });
+
+    describe('onAuctionEndEvent: overquota beacon enrichment', () => {
+      beforeEach(() => {
+        // Mock getGlobal().getHighestCpmBids()
+        sandbox.stub(prebidGlobalModule, 'getGlobal').returns({
+          getHighestCpmBids: () => []
+        });
+
+        // Reset reqBidsConfigObj
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+      });
+
+      it('should report wurfl_ssp for authorized bidders and none for unauthorized when overquota', (done) => {
+        // Setup overquota scenario
+        const wurfl_pbjs_over_quota = {
+          ...wurfl_pbjs,
+          over_quota: 1
+        };
+        const cachedData = { WURFL, wurfl_pbjs: wurfl_pbjs_over_quota };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        const sendBeaconStub = sandbox.stub(ajaxModule, 'sendBeacon').returns(true);
+
+        const callback = () => {
+          const auctionDetails = {
+            bidsReceived: [
+              { requestId: 'req1', bidderCode: 'bidder1', adUnitCode: 'ad1', cpm: 1.5, currency: 'USD' },
+              { requestId: 'req2', bidderCode: 'bidder2', adUnitCode: 'ad1', cpm: 1.2, currency: 'USD' }
+            ],
+            adUnits: [
+              {
+                code: 'ad1',
+                bids: [
+                  { bidder: 'bidder1' },  // authorized
+                  { bidder: 'bidder2' },  // authorized
+                  { bidder: 'bidder3' }   // NOT authorized
+                ]
+              }
+            ]
+          };
+          const config = { params: {} };
+          const userConsent = {};
+
+          wurflSubmodule.onAuctionEndEvent(auctionDetails, config, userConsent);
+
+          expect(sendBeaconStub.calledOnce).to.be.true;
+          const beaconCall = sendBeaconStub.getCall(0);
+          const payload = JSON.parse(beaconCall.args[1]);
+
+          // Verify overall enrichment is still wurfl_pub for backwards compatibility
+          expect(payload).to.have.property('enrichment', 'wurfl_pub');
+
+          // Verify per-bidder enrichment
+          expect(payload.ad_units).to.be.an('array').with.lengthOf(1);
+          expect(payload.ad_units[0].bidders).to.be.an('array').with.lengthOf(3);
+
+          // bidder1 and bidder2 are authorized - should report wurfl_ssp
+          expect(payload.ad_units[0].bidders[0]).to.deep.include({
+            bidder: 'bidder1',
+            enrichment: 'wurfl_ssp',
+            cpm: 1.5,
+            currency: 'USD',
+            won: false
+          });
+          expect(payload.ad_units[0].bidders[1]).to.deep.include({
+            bidder: 'bidder2',
+            enrichment: 'wurfl_ssp',
+            cpm: 1.2,
+            currency: 'USD',
+            won: false
+          });
+
+          // bidder3 is NOT authorized and overquota - should report none
+          expect(payload.ad_units[0].bidders[2]).to.deep.include({
+            bidder: 'bidder3',
+            enrichment: 'none',
+            won: false
+          });
+
+          done();
+        };
+
+        const config = { params: {} };
+        const userConsent = {};
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, userConsent);
+      });
+
+      it('should report wurfl_ssp for authorized and wurfl_pub for unauthorized when not overquota', (done) => {
+        // Setup NOT overquota scenario
+        const cachedData = { WURFL, wurfl_pbjs };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        const sendBeaconStub = sandbox.stub(ajaxModule, 'sendBeacon').returns(true);
+
+        const callback = () => {
+          const auctionDetails = {
+            bidsReceived: [
+              { requestId: 'req1', bidderCode: 'bidder1', adUnitCode: 'ad1', cpm: 1.5, currency: 'USD' },
+              { requestId: 'req3', bidderCode: 'bidder3', adUnitCode: 'ad1', cpm: 1.0, currency: 'USD' }
+            ],
+            adUnits: [
+              {
+                code: 'ad1',
+                bids: [
+                  { bidder: 'bidder1' },  // authorized
+                  { bidder: 'bidder3' }   // NOT authorized
+                ]
+              }
+            ]
+          };
+          const config = { params: {} };
+          const userConsent = {};
+
+          wurflSubmodule.onAuctionEndEvent(auctionDetails, config, userConsent);
+
+          expect(sendBeaconStub.calledOnce).to.be.true;
+          const beaconCall = sendBeaconStub.getCall(0);
+          const payload = JSON.parse(beaconCall.args[1]);
+
+          // Verify per-bidder enrichment
+          expect(payload.ad_units).to.be.an('array').with.lengthOf(1);
+          expect(payload.ad_units[0].bidders).to.be.an('array').with.lengthOf(2);
+
+          // bidder1 is authorized - should always report wurfl_ssp
+          expect(payload.ad_units[0].bidders[0]).to.deep.include({
+            bidder: 'bidder1',
+            enrichment: 'wurfl_ssp',
+            cpm: 1.5,
+            currency: 'USD',
+            won: false
+          });
+
+          // bidder3 is NOT authorized but not overquota - should report wurfl_pub
+          expect(payload.ad_units[0].bidders[1]).to.deep.include({
+            bidder: 'bidder3',
+            enrichment: 'wurfl_pub',
+            cpm: 1.0,
+            currency: 'USD',
+            won: false
+          });
+
+          done();
+        };
+
+        const config = { params: {} };
+        const userConsent = {};
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, userConsent);
       });
     });
 

@@ -79,9 +79,8 @@ export const storage = getStorageManager({
   moduleName: MODULE_NAME,
 });
 
-// enrichedBidders holds a list of prebid bidder names, of bidders which have been
-// injected with WURFL data
-const enrichedBidders = new Set();
+// bidderEnrichment maps bidder codes to their enrichment type for beacon reporting
+const bidderEnrichment = new Map();
 
 // enrichmentType tracks the overall enrichment type used in the current auction
 let enrichmentType = ENRICHMENT_TYPE.NONE;
@@ -330,9 +329,11 @@ function enrichDeviceBidder(reqBidsConfigObj, bidders, wjsDevice) {
       return;
     }
 
-    // Track only authorized bidders for analytics
+    // Set enrichment type based on authorization status
     if (wjsDevice._isAuthorized(bidderCode)) {
-      enrichedBidders.add(bidderCode);
+      bidderEnrichment.set(bidderCode, ENRICHMENT_TYPE.WURFL_SSP);
+    } else {
+      bidderEnrichment.set(bidderCode, ENRICHMENT_TYPE.WURFL_PUB);
     }
 
     // Inject WURFL data
@@ -472,11 +473,12 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
   // Start module execution timing
   WurflDebugger.moduleExecutionStart();
 
-  // Extract bidders from request configuration
+  // Extract bidders from request configuration and set default enrichment
   const bidders = new Set();
   reqBidsConfigObj.adUnits.forEach(adUnit => {
     adUnit.bids.forEach(bid => {
       bidders.add(bid.bidder);
+      bidderEnrichment.set(bid.bidder, ENRICHMENT_TYPE.NONE);
     });
   });
 
@@ -539,6 +541,7 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
 
   // Set enrichment type to LCE
   enrichmentType = ENRICHMENT_TYPE.LCE;
+  bidders.forEach(bidder => bidderEnrichment.set(bidder, ENRICHMENT_TYPE.LCE));
 
   // Set default sampling rate for LCE
   samplingRate = DEFAULT_SAMPLING_RATE;
@@ -697,7 +700,7 @@ function onAuctionEndEvent(auctionDetails, config, userConsent) {
           const isWinner = winningBidIds[bidResponse.requestId] === true;
           bidders.push({
             bidder: bidderCode,
-            enrichment: enrichmentType,
+            enrichment: bidderEnrichment.get(bidderCode),
             cpm: bidResponse.cpm,
             currency: bidResponse.currency,
             won: isWinner
@@ -706,7 +709,7 @@ function onAuctionEndEvent(auctionDetails, config, userConsent) {
           // Bidder didn't respond - include without cpm/currency
           bidders.push({
             bidder: bidderCode,
-            enrichment: enrichmentType,
+            enrichment: bidderEnrichment.get(bidderCode),
             won: false
           });
         }

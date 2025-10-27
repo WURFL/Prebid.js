@@ -12,6 +12,7 @@ import { getGlobal } from '../src/prebidGlobal.js';
 // Constants
 const REAL_TIME_MODULE = 'realTimeData';
 const MODULE_NAME = 'wurfl';
+const MODULE_VERSION = '2.0.0-beta1';
 
 // WURFL_JS_HOST is the host for the WURFL service endpoints
 const WURFL_JS_HOST = 'https://prebid.wurflcloud.com';
@@ -118,6 +119,9 @@ const WurflDebugger = {
     // Full debug mode - create/reset window object for tracking
     if (typeof window !== 'undefined') {
       window.WurflRtdDebug = {
+        // Module version
+        version: MODULE_VERSION,
+
         // Data source for current auction
         dataSource: 'unknown', // 'cache' | 'lce'
 
@@ -737,6 +741,7 @@ function onAuctionEndEvent(auctionDetails, config, userConsent) {
 
   // Build complete payload
   const payloadData = {
+    version: MODULE_VERSION,
     domain: typeof window !== 'undefined' ? window.location.hostname : '',
     path: typeof window !== 'undefined' ? window.location.pathname : '',
     sampling_rate: samplingRate,

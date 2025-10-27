@@ -730,6 +730,7 @@ describe('wurflRtdProvider', function () {
 
         // Parse and verify payload structure
         const payload = JSON.parse(beaconCall.args[1]);
+        expect(payload).to.have.property('version', '2.0.0-beta1');
         expect(payload).to.have.property('domain');
         expect(payload).to.have.property('path');
         expect(payload).to.have.property('sampling_rate', 100);

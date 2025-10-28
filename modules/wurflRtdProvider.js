@@ -12,7 +12,7 @@ import { getGlobal } from '../src/prebidGlobal.js';
 // Constants
 const REAL_TIME_MODULE = 'realTimeData';
 const MODULE_NAME = 'wurfl';
-const MODULE_VERSION = '2.0.0-beta1';
+const MODULE_VERSION = '2.0.0-beta2';
 
 // WURFL_JS_HOST is the host for the WURFL service endpoints
 const WURFL_JS_HOST = 'https://prebid.wurflcloud.com';
@@ -81,16 +81,16 @@ export const storage = getStorageManager({
 });
 
 // bidderEnrichment maps bidder codes to their enrichment type for beacon reporting
-const bidderEnrichment = new Map();
+let bidderEnrichment;
 
 // enrichmentType tracks the overall enrichment type used in the current auction
-let enrichmentType = ENRICHMENT_TYPE.NONE;
+let enrichmentType;
 
 // wurflId stores the WURFL ID from device data
-let wurflId = '';
+let wurflId;
 
 // samplingRate tracks the beacon sampling rate (0-100)
-let samplingRate = DEFAULT_SAMPLING_RATE;
+let samplingRate;
 
 // abTest stores A/B test configuration and variant (set by init)
 let abTest;
@@ -450,8 +450,14 @@ const init = (config, userConsent) => {
   const isDebug = config?.params?.debug ?? false;
   WurflDebugger.init(isDebug);
 
-  // A/B testing: reset state, then set if enabled
+  // Initialize module state
+  bidderEnrichment = new Map();
+  enrichmentType = ENRICHMENT_TYPE.NONE;
+  wurflId = '';
+  samplingRate = DEFAULT_SAMPLING_RATE;
   abTest = null;
+
+  // A/B testing: set if enabled
   const abTestEnabled = config?.params?.abTest ?? false;
   if (abTestEnabled) {
     const ab_name = config?.params?.abName ?? AB_TEST.DEFAULT_NAME;
@@ -512,11 +518,9 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
     const wjsDevice = WurflJSDevice.fromCache(cachedWurflData);
     if (!wjsDevice._isOverQuota()) {
       enrichDeviceFPD(reqBidsConfigObj, wjsDevice.FPD());
+      enrichmentType = ENRICHMENT_TYPE.WURFL_PUB;
     }
     enrichDeviceBidder(reqBidsConfigObj, bidders, wjsDevice);
-
-    // Set enrichment type to WURFL publisher caps
-    enrichmentType = ENRICHMENT_TYPE.WURFL_PUB;
 
     // Store WURFL ID for analytics
     wurflId = cachedWurflData.WURFL?.wurfl_id || '';

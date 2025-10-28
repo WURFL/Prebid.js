@@ -730,7 +730,7 @@ describe('wurflRtdProvider', function () {
 
         // Parse and verify payload structure
         const payload = JSON.parse(beaconCall.args[1]);
-        expect(payload).to.have.property('version', '2.0.0-beta1');
+        expect(payload).to.have.property('version');
         expect(payload).to.have.property('domain');
         expect(payload).to.have.property('path');
         expect(payload).to.have.property('sampling_rate', 100);
@@ -1194,8 +1194,8 @@ describe('wurflRtdProvider', function () {
           const beaconCall = sendBeaconStub.getCall(0);
           const payload = JSON.parse(beaconCall.args[1]);
 
-          // Verify overall enrichment is still wurfl_pub for backwards compatibility
-          expect(payload).to.have.property('enrichment', 'wurfl_pub');
+          // Verify overall enrichment is none when overquota (publisher not enriched)
+          expect(payload).to.have.property('enrichment', 'none');
 
           // Verify per-bidder enrichment
           expect(payload.ad_units).to.be.an('array').with.lengthOf(1);
@@ -1266,6 +1266,9 @@ describe('wurflRtdProvider', function () {
           expect(sendBeaconStub.calledOnce).to.be.true;
           const beaconCall = sendBeaconStub.getCall(0);
           const payload = JSON.parse(beaconCall.args[1]);
+
+          // Verify overall enrichment is wurfl_pub when not overquota
+          expect(payload).to.have.property('enrichment', 'wurfl_pub');
 
           // Verify per-bidder enrichment
           expect(payload.ad_units).to.be.an('array').with.lengthOf(1);

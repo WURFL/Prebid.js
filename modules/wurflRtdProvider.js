@@ -125,6 +125,9 @@ const WurflDebugger = {
         // Module version
         version: MODULE_VERSION,
 
+        // Prebid.js version
+        pbjsVersion: getGlobal().version,
+
         // Data source for current auction
         dataSource: 'unknown', // 'cache' | 'lce'
 

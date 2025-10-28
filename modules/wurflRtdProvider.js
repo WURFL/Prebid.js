@@ -12,7 +12,7 @@ import { getGlobal } from '../src/prebidGlobal.js';
 // Constants
 const REAL_TIME_MODULE = 'realTimeData';
 const MODULE_NAME = 'wurfl';
-const MODULE_VERSION = '2.0.0-beta2';
+const MODULE_VERSION = '2.0.0-beta3';
 
 // WURFL_JS_HOST is the host for the WURFL service endpoints
 const WURFL_JS_HOST = 'https://prebid.wurflcloud.com';
@@ -71,6 +71,9 @@ const AB_TEST = {
   DEFAULT_SPLIT: 50,
   DEFAULT_NAME: 'unknown'
 };
+
+// Tier constants
+const TIER_FREE = 'free';
 
 const logger = prefixLog('[WURFL RTD Submodule]');
 
@@ -964,6 +967,11 @@ const WurflJSDevice = {
       ...this._getPubCaps(),
       ...(isAuthorized ? this._getBidderCaps(bidderCode) : {})
     };
+
+    // Exclude wurfl_id for free tier
+    if (this._pbjsData.tier === TIER_FREE && 'wurfl_id' in wurflData) {
+      delete wurflData.wurfl_id;
+    }
 
     return {
       device: {

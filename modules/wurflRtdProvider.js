@@ -98,160 +98,6 @@ let samplingRate;
 // abTest stores A/B test configuration and variant (set by init)
 let abTest;
 
-// WurflDebugger object for performance tracking and debugging
-const WurflDebugger = {
-  // Private timing start values
-  _moduleExecutionStart: null,
-  _cacheReadStart: null,
-  _lceDetectionStart: null,
-  _cacheWriteStart: null,
-  _wurflJsLoadStart: null,
-
-  // Initialize WURFL debug tracking
-  init(isDebug) {
-    if (!isDebug) {
-      // Replace all methods (except init) with no-ops for zero overhead
-      Object.keys(this).forEach(key => {
-        if (typeof this[key] === 'function' && key !== 'init') {
-          this[key] = () => { };
-        }
-      });
-      return;
-    }
-
-    // Full debug mode - create/reset window object for tracking
-    if (typeof window !== 'undefined') {
-      window.WurflRtdDebug = {
-        // Module version
-        version: MODULE_VERSION,
-
-        // Prebid.js version
-        pbjsVersion: getGlobal().version,
-
-        // Data source for current auction
-        dataSource: 'unknown', // 'cache' | 'lce'
-
-        // Cache state
-        cacheExpired: false,    // Whether the cache was expired when used
-
-        // Simple timing measurements
-        moduleExecutionTime: null, // Total time from getBidRequestData start to callback
-        cacheReadTime: null,    // Single cache read time (hit or miss)
-        lceDetectionTime: null, // LCE detection time (only if dataSource = 'lce')
-        cacheWriteTime: null,   // Async cache write time (for future auctions)
-        wurflJsLoadTime: null,  // Total time from WURFL.js load start to cache complete
-
-        // The actual data used in current auction
-        data: {
-          // When dataSource = 'cache'
-          wurflData: null,      // The cached WURFL device data
-          pbjsData: null,       // The cached wurfl_pbjs data
-
-          // When dataSource = 'lce'
-          lceDevice: null       // The LCE-generated device object
-        },
-
-        // Beacon payload sent to analytics endpoint
-        beaconPayload: null
-      };
-    }
-  },
-
-  // Module execution timing methods
-  moduleExecutionStart() {
-    this._moduleExecutionStart = performance.now();
-  },
-
-  moduleExecutionStop() {
-    if (this._moduleExecutionStart === null) return;
-    const duration = performance.now() - this._moduleExecutionStart;
-    window.WurflRtdDebug.moduleExecutionTime = duration;
-    this._moduleExecutionStart = null;
-  },
-
-  // Cache read timing methods
-  cacheReadStart() {
-    this._cacheReadStart = performance.now();
-  },
-
-  cacheReadStop() {
-    if (this._cacheReadStart === null) return;
-    const duration = performance.now() - this._cacheReadStart;
-    window.WurflRtdDebug.cacheReadTime = duration;
-    this._cacheReadStart = null;
-  },
-
-  // LCE detection timing methods
-  lceDetectionStart() {
-    this._lceDetectionStart = performance.now();
-  },
-
-  lceDetectionStop() {
-    if (this._lceDetectionStart === null) return;
-    const duration = performance.now() - this._lceDetectionStart;
-    window.WurflRtdDebug.lceDetectionTime = duration;
-    this._lceDetectionStart = null;
-  },
-
-  // Cache write timing methods
-  cacheWriteStart() {
-    this._cacheWriteStart = performance.now();
-  },
-
-  cacheWriteStop() {
-    if (this._cacheWriteStart === null) return;
-    const duration = performance.now() - this._cacheWriteStart;
-    window.WurflRtdDebug.cacheWriteTime = duration;
-    this._cacheWriteStart = null;
-
-    // Calculate total WURFL.js load time (from load start to cache complete)
-    if (this._wurflJsLoadStart !== null) {
-      const totalLoadTime = performance.now() - this._wurflJsLoadStart;
-      window.WurflRtdDebug.wurflJsLoadTime = totalLoadTime;
-      this._wurflJsLoadStart = null;
-    }
-
-    // Dispatch custom event when cache write data is available
-    if (typeof window !== 'undefined' && window.dispatchEvent) {
-      const event = new CustomEvent('wurflCacheWriteComplete', {
-        detail: {
-          duration: duration,
-          timestamp: Date.now(),
-          debugData: window.WurflRtdDebug
-        }
-      });
-      window.dispatchEvent(event);
-    }
-  },
-
-  // WURFL.js load timing methods
-  wurflJsLoadStart() {
-    this._wurflJsLoadStart = performance.now();
-  },
-
-  // Data tracking methods
-  setDataSource(source) {
-    window.WurflRtdDebug.dataSource = source;
-  },
-
-  setCacheData(wurflData, pbjsData) {
-    window.WurflRtdDebug.data.wurflData = wurflData;
-    window.WurflRtdDebug.data.pbjsData = pbjsData;
-  },
-
-  setLceData(lceDevice) {
-    window.WurflRtdDebug.data.lceDevice = lceDevice;
-  },
-
-  setCacheExpired(expired) {
-    window.WurflRtdDebug.cacheExpired = expired;
-  },
-
-  setBeaconPayload(payload) {
-    window.WurflRtdDebug.beaconPayload = payload;
-  }
-};
-
 /**
  * Safely gets an object from localStorage with JSON parsing
  * @param {string} key The storage key
@@ -447,127 +293,6 @@ function shouldSample(rate) {
 }
 
 /**
- * init initializes the WURFL RTD submodule
- * @param {Object} config Configuration for WURFL RTD submodule
- * @param {Object} userConsent User consent data
- */
-const init = (config, userConsent) => {
-  // Initialize debugger based on debug flag
-  const isDebug = config?.params?.debug ?? false;
-  WurflDebugger.init(isDebug);
-
-  // Initialize module state
-  bidderEnrichment = new Map();
-  enrichmentType = ENRICHMENT_TYPE.NONE;
-  wurflId = '';
-  samplingRate = DEFAULT_SAMPLING_RATE;
-  abTest = null;
-
-  // A/B testing: set if enabled
-  const abTestEnabled = config?.params?.abTest ?? false;
-  if (abTestEnabled) {
-    const ab_name = config?.params?.abName ?? AB_TEST.DEFAULT_NAME;
-    const abSplit = config?.params?.abSplit ?? AB_TEST.DEFAULT_SPLIT;
-    const isInTreatment = shouldSample(abSplit);
-    const ab_variant = isInTreatment ? AB_TEST.TREATMENT_GROUP : AB_TEST.CONTROL_GROUP;
-    abTest = { ab_name, ab_variant };
-    logger.logMessage(`A/B test "${ab_name}": user in ${ab_variant} group`);
-  }
-
-  logger.logMessage('initialized');
-  return true;
-}
-
-/**
- * getBidRequestData enriches the OpenRTB 2.0 device data with WURFL data
- * @param {Object} reqBidsConfigObj Bid request configuration object
- * @param {Function} callback Called on completion
- * @param {Object} config Configuration for WURFL RTD submodule
- * @param {Object} userConsent User consent data
- */
-const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
-  // Start module execution timing
-  WurflDebugger.moduleExecutionStart();
-
-  // Extract bidders from request configuration and set default enrichment
-  const bidders = new Set();
-  reqBidsConfigObj.adUnits.forEach(adUnit => {
-    adUnit.bids.forEach(bid => {
-      bidders.add(bid.bidder);
-      bidderEnrichment.set(bid.bidder, ENRICHMENT_TYPE.NONE);
-    });
-  });
-
-  // A/B test: Skip enrichment for control group but allow beacon sending
-  if (abTest && abTest.ab_variant === AB_TEST.CONTROL_GROUP) {
-    logger.logMessage('A/B test control group: skipping enrichment');
-    enrichmentType = ENRICHMENT_TYPE.NONE;
-    WurflDebugger.moduleExecutionStop();
-    callback();
-    return;
-  }
-
-  // Priority 1: Check if WURFL.js response is cached
-  WurflDebugger.cacheReadStart();
-  const cachedWurflData = getObjectFromStorage(WURFL_RTD_STORAGE_KEY);
-  WurflDebugger.cacheReadStop();
-
-  if (cachedWurflData) {
-    const isExpired = cachedWurflData.expire_at && Date.now() > cachedWurflData.expire_at;
-
-    WurflDebugger.setDataSource('cache');
-    WurflDebugger.setCacheExpired(isExpired);
-    WurflDebugger.setCacheData(cachedWurflData.WURFL, cachedWurflData.wurfl_pbjs);
-
-    logger.logMessage(isExpired ? 'using expired cached WURFL.js data' : 'using cached WURFL.js data');
-
-    const wjsDevice = WurflJSDevice.fromCache(cachedWurflData);
-    if (!wjsDevice._isOverQuota()) {
-      enrichDeviceFPD(reqBidsConfigObj, wjsDevice.FPD());
-      enrichmentType = ENRICHMENT_TYPE.WURFL_PUB;
-    }
-    enrichDeviceBidder(reqBidsConfigObj, bidders, wjsDevice);
-
-    // Store WURFL ID for analytics
-    wurflId = cachedWurflData.WURFL?.wurfl_id || '';
-
-    // Store sampling rate for beacon
-    samplingRate = cachedWurflData.wurfl_pbjs?.sampling_rate ?? DEFAULT_SAMPLING_RATE;
-
-    // If expired, refresh cache async
-    if (isExpired) {
-      loadWurflJsAsync(config, bidders);
-    }
-
-    WurflDebugger.moduleExecutionStop();
-    callback();
-    return;
-  }
-
-  // Priority 2: return LCE data
-  logger.logMessage('generating fresh LCE data');
-  WurflDebugger.setDataSource('lce');
-  WurflDebugger.lceDetectionStart();
-  const fpdDevice = WurflLCEDevice.FPD();
-  WurflDebugger.lceDetectionStop();
-  WurflDebugger.setLceData(fpdDevice);
-  enrichDeviceFPD(reqBidsConfigObj, fpdDevice);
-
-  // Set enrichment type to LCE
-  enrichmentType = ENRICHMENT_TYPE.LCE;
-  bidders.forEach(bidder => bidderEnrichment.set(bidder, ENRICHMENT_TYPE.LCE));
-
-  // Set default sampling rate for LCE
-  samplingRate = DEFAULT_SAMPLING_RATE;
-
-  // Load WURFL.js async for future requests
-  loadWurflJsAsync(config, bidders);
-
-  WurflDebugger.moduleExecutionStop();
-  callback();
-}
-
-/**
  * getConsentClass calculates the consent classification level
  * @param {Object} userConsent User consent data
  * @returns {number} Consent class (0, 1, or 2)
@@ -589,7 +314,6 @@ function getConsentClass(userConsent) {
       return CONSENT_CLASS.NO;
     }
   }
-
 
   // Check GDPR object exists
   if (!userConsent.gdpr) {
@@ -642,159 +366,161 @@ function getConsentClass(userConsent) {
   return CONSENT_CLASS.PARTIAL;
 }
 
-/**
- * onAuctionEndEvent is called when the auction ends
- * @param {Object} auctionDetails Auction details
- * @param {Object} config Configuration for WURFL RTD submodule
- * @param {Object} userConsent User consent data
- */
-function onAuctionEndEvent(auctionDetails, config, userConsent) {
+// ==================== CLASSES ====================
 
-  // Apply sampling
-  if (!shouldSample(samplingRate)) {
-    logger.logMessage(`beacon skipped due to sampling (rate: ${samplingRate}%)`);
-    return;
-  }
+// WurflDebugger object for performance tracking and debugging
+const WurflDebugger = {
+  // Private timing start values
+  _moduleExecutionStart: null,
+  _cacheReadStart: null,
+  _lceDetectionStart: null,
+  _cacheWriteStart: null,
+  _wurflJsLoadStart: null,
 
-  const statsHost = config.params?.statsHost ?? null;
-
-  let host = STATS_HOST;
-  if (statsHost) {
-    host = statsHost;
-  }
-
-  const url = new URL(host);
-  url.pathname = STATS_ENDPOINT_PATH;
-
-  // Only send beacon if there are bids to report
-  if (!auctionDetails.bidsReceived || auctionDetails.bidsReceived.length === 0) {
-    return;
-  }
-
-  logger.logMessage(`onAuctionEndEvent: processing ${auctionDetails.bidsReceived.length} bid responses`);
-
-  // Build a lookup object for winning bid request IDs
-  const winningBids = getGlobal().getHighestCpmBids() || [];
-  const winningBidIds = {};
-  for (let i = 0; i < winningBids.length; i++) {
-    const bid = winningBids[i];
-    winningBidIds[bid.requestId] = true;
-  }
-
-  logger.logMessage(`onAuctionEndEvent: ${winningBids.length} winning bids identified`);
-
-  // Build a lookup object for bid responses: "adUnitCode:bidderCode" -> bid
-  const bidResponseMap = {};
-  for (let i = 0; i < auctionDetails.bidsReceived.length; i++) {
-    const bid = auctionDetails.bidsReceived[i];
-    const adUnitCode = bid.adUnitCode;
-    const bidderCode = bid.bidderCode || bid.bidder;
-    const key = adUnitCode + ':' + bidderCode;
-    bidResponseMap[key] = bid;
-  }
-
-  // Build ad units array with all bidders (including non-responders)
-  const adUnits = [];
-
-  if (auctionDetails.adUnits) {
-    for (let i = 0; i < auctionDetails.adUnits.length; i++) {
-      const adUnit = auctionDetails.adUnits[i];
-      const adUnitCode = adUnit.code;
-      const bidders = [];
-
-      // Check each bidder configured for this ad unit
-      for (let j = 0; j < adUnit.bids.length; j++) {
-        const bidConfig = adUnit.bids[j];
-        const bidderCode = bidConfig.bidder;
-        const key = adUnitCode + ':' + bidderCode;
-        const bidResponse = bidResponseMap[key];
-
-        if (bidResponse) {
-          // Bidder responded - include full data
-          const isWinner = winningBidIds[bidResponse.requestId] === true;
-          bidders.push({
-            bidder: bidderCode,
-            enrichment: bidderEnrichment.get(bidderCode),
-            cpm: bidResponse.cpm,
-            currency: bidResponse.currency,
-            won: isWinner
-          });
-        } else {
-          // Bidder didn't respond - include without cpm/currency
-          bidders.push({
-            bidder: bidderCode,
-            enrichment: bidderEnrichment.get(bidderCode),
-            won: false
-          });
+  // Initialize WURFL debug tracking
+  init(isDebug) {
+    if (!isDebug) {
+      // Replace all methods (except init) with no-ops for zero overhead
+      Object.keys(this).forEach(key => {
+        if (typeof this[key] === 'function' && key !== 'init') {
+          this[key] = () => { };
         }
-      }
-
-      adUnits.push({
-        ad_unit_code: adUnitCode,
-        bidders: bidders
       });
+      return;
     }
+
+    // Full debug mode - create/reset window object for tracking
+    if (typeof window !== 'undefined') {
+      window.WurflRtdDebug = {
+        // Module version
+        version: MODULE_VERSION,
+
+        // Prebid.js version
+        pbjsVersion: getGlobal().version,
+
+        // Data source for current auction
+        dataSource: 'unknown', // 'cache' | 'lce'
+
+        // Cache state
+        cacheExpired: false,    // Whether the cache was expired when used
+
+        // Simple timing measurements
+        moduleExecutionTime: null, // Total time from getBidRequestData start to callback
+        cacheReadTime: null,    // Single cache read time (hit or miss)
+        lceDetectionTime: null, // LCE detection time (only if dataSource = 'lce')
+        cacheWriteTime: null,   // Async cache write time (for future auctions)
+        wurflJsLoadTime: null,  // Total time from WURFL.js load start to cache complete
+
+        // The actual data used in current auction
+        data: {
+          // When dataSource = 'cache'
+          wurflData: null,      // The cached WURFL device data
+          pbjsData: null,       // The cached wurfl_pbjs data
+
+          // When dataSource = 'lce'
+          lceDevice: null       // The LCE-generated device object
+        },
+
+        // Beacon payload sent to analytics endpoint
+        beaconPayload: null
+      };
+    }
+  },
+
+  // Module execution timing methods
+  moduleExecutionStart() {
+    this._moduleExecutionStart = performance.now();
+  },
+
+  moduleExecutionStop() {
+    if (this._moduleExecutionStart === null) return;
+    const duration = performance.now() - this._moduleExecutionStart;
+    window.WurflRtdDebug.moduleExecutionTime = duration;
+    this._moduleExecutionStart = null;
+  },
+
+  // Cache read timing methods
+  cacheReadStart() {
+    this._cacheReadStart = performance.now();
+  },
+
+  cacheReadStop() {
+    if (this._cacheReadStart === null) return;
+    const duration = performance.now() - this._cacheReadStart;
+    window.WurflRtdDebug.cacheReadTime = duration;
+    this._cacheReadStart = null;
+  },
+
+  // LCE detection timing methods
+  lceDetectionStart() {
+    this._lceDetectionStart = performance.now();
+  },
+
+  lceDetectionStop() {
+    if (this._lceDetectionStart === null) return;
+    const duration = performance.now() - this._lceDetectionStart;
+    window.WurflRtdDebug.lceDetectionTime = duration;
+    this._lceDetectionStart = null;
+  },
+
+  // Cache write timing methods
+  cacheWriteStart() {
+    this._cacheWriteStart = performance.now();
+  },
+
+  cacheWriteStop() {
+    if (this._cacheWriteStart === null) return;
+    const duration = performance.now() - this._cacheWriteStart;
+    window.WurflRtdDebug.cacheWriteTime = duration;
+    this._cacheWriteStart = null;
+
+    // Calculate total WURFL.js load time (from load start to cache complete)
+    if (this._wurflJsLoadStart !== null) {
+      const totalLoadTime = performance.now() - this._wurflJsLoadStart;
+      window.WurflRtdDebug.wurflJsLoadTime = totalLoadTime;
+      this._wurflJsLoadStart = null;
+    }
+
+    // Dispatch custom event when cache write data is available
+    if (typeof window !== 'undefined' && window.dispatchEvent) {
+      const event = new CustomEvent('wurflCacheWriteComplete', {
+        detail: {
+          duration: duration,
+          timestamp: Date.now(),
+          debugData: window.WurflRtdDebug
+        }
+      });
+      window.dispatchEvent(event);
+    }
+  },
+
+  // WURFL.js load timing methods
+  wurflJsLoadStart() {
+    this._wurflJsLoadStart = performance.now();
+  },
+
+  // Data tracking methods
+  setDataSource(source) {
+    window.WurflRtdDebug.dataSource = source;
+  },
+
+  setCacheData(wurflData, pbjsData) {
+    window.WurflRtdDebug.data.wurflData = wurflData;
+    window.WurflRtdDebug.data.pbjsData = pbjsData;
+  },
+
+  setLceData(lceDevice) {
+    window.WurflRtdDebug.data.lceDevice = lceDevice;
+  },
+
+  setCacheExpired(expired) {
+    window.WurflRtdDebug.cacheExpired = expired;
+  },
+
+  setBeaconPayload(payload) {
+    window.WurflRtdDebug.beaconPayload = payload;
   }
-
-  // Count bidders for logging
-  let totalBidderEntries = 0;
-  for (let i = 0; i < adUnits.length; i++) {
-    totalBidderEntries += adUnits[i].bidders.length;
-  }
-  const respondedBidders = auctionDetails.bidsReceived.length;
-  const nonRespondingBidders = totalBidderEntries - respondedBidders;
-
-  logger.logMessage(`onAuctionEndEvent: built ${adUnits.length} ad units with ${totalBidderEntries} total bidder entries (${respondedBidders} responded, ${nonRespondingBidders} non-responding)`);
-
-  // Calculate consent class
-  const consentClass = getConsentClass(userConsent);
-
-  // Build complete payload
-  const payloadData = {
-    version: MODULE_VERSION,
-    domain: typeof window !== 'undefined' ? window.location.hostname : '',
-    path: typeof window !== 'undefined' ? window.location.pathname : '',
-    sampling_rate: samplingRate,
-    enrichment: enrichmentType,
-    wurfl_id: wurflId,
-    consent_class: consentClass,
-    ad_units: adUnits
-  };
-
-  // Add A/B test fields if enabled
-  if (abTest) {
-    payloadData.ab_name = abTest.ab_name;
-    payloadData.ab_variant = abTest.ab_variant;
-  }
-
-  const payload = JSON.stringify(payloadData);
-
-  const sentBeacon = sendBeacon(url.toString(), payload);
-  if (sentBeacon) {
-    WurflDebugger.setBeaconPayload(JSON.parse(payload));
-    return;
-  }
-
-  fetch(url.toString(), {
-    method: 'POST',
-    body: payload,
-    mode: 'no-cors',
-    keepalive: true
-  });
-
-  WurflDebugger.setBeaconPayload(JSON.parse(payload));
-}
-
-// The WURFL submodule
-export const wurflSubmodule = {
-  name: MODULE_NAME,
-  init,
-  getBidRequestData,
-  onAuctionEndEvent,
-}
-
-// Register the WURFL submodule as submodule of realTimeData
-submodule(REAL_TIME_MODULE, wurflSubmodule);
+};
 
 // ==================== WURFL JS DEVICE MODULE ====================
 const WurflJSDevice = {
@@ -1243,3 +969,281 @@ const WurflLCEDevice = {
   }
 };
 // ==================== END WURFL LCE DEVICE MODULE ====================
+
+// ==================== EXPORTED FUNCTIONS ====================
+
+/**
+ * init initializes the WURFL RTD submodule
+ * @param {Object} config Configuration for WURFL RTD submodule
+ * @param {Object} userConsent User consent data
+ */
+const init = (config, userConsent) => {
+  // Initialize debugger based on debug flag
+  const isDebug = config?.params?.debug ?? false;
+  WurflDebugger.init(isDebug);
+
+  // Initialize module state
+  bidderEnrichment = new Map();
+  enrichmentType = ENRICHMENT_TYPE.NONE;
+  wurflId = '';
+  samplingRate = DEFAULT_SAMPLING_RATE;
+  abTest = null;
+
+  // A/B testing: set if enabled
+  const abTestEnabled = config?.params?.abTest ?? false;
+  if (abTestEnabled) {
+    const abName = config?.params?.abName ?? AB_TEST.DEFAULT_NAME;
+    const abSplit = config?.params?.abSplit ?? AB_TEST.DEFAULT_SPLIT;
+    const isInTreatment = shouldSample(abSplit);
+    const abVariant = isInTreatment ? AB_TEST.TREATMENT_GROUP : AB_TEST.CONTROL_GROUP;
+    abTest = { ab_name: abName, ab_variant: abVariant };
+    logger.logMessage(`A/B test "${abName}": user in ${abVariant} group`);
+  }
+
+  logger.logMessage('initialized');
+  return true;
+}
+
+/**
+ * getBidRequestData enriches the OpenRTB 2.0 device data with WURFL data
+ * @param {Object} reqBidsConfigObj Bid request configuration object
+ * @param {Function} callback Called on completion
+ * @param {Object} config Configuration for WURFL RTD submodule
+ * @param {Object} userConsent User consent data
+ */
+const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
+  // Start module execution timing
+  WurflDebugger.moduleExecutionStart();
+
+  // Extract bidders from request configuration and set default enrichment
+  const bidders = new Set();
+  reqBidsConfigObj.adUnits.forEach(adUnit => {
+    adUnit.bids.forEach(bid => {
+      bidders.add(bid.bidder);
+      bidderEnrichment.set(bid.bidder, ENRICHMENT_TYPE.NONE);
+    });
+  });
+
+  // A/B test: Skip enrichment for control group but allow beacon sending
+  if (abTest && abTest.ab_variant === AB_TEST.CONTROL_GROUP) {
+    logger.logMessage('A/B test control group: skipping enrichment');
+    enrichmentType = ENRICHMENT_TYPE.NONE;
+    WurflDebugger.moduleExecutionStop();
+    callback();
+    return;
+  }
+
+  // Priority 1: Check if WURFL.js response is cached
+  WurflDebugger.cacheReadStart();
+  const cachedWurflData = getObjectFromStorage(WURFL_RTD_STORAGE_KEY);
+  WurflDebugger.cacheReadStop();
+
+  if (cachedWurflData) {
+    const isExpired = cachedWurflData.expire_at && Date.now() > cachedWurflData.expire_at;
+
+    WurflDebugger.setDataSource('cache');
+    WurflDebugger.setCacheExpired(isExpired);
+    WurflDebugger.setCacheData(cachedWurflData.WURFL, cachedWurflData.wurfl_pbjs);
+
+    logger.logMessage(isExpired ? 'using expired cached WURFL.js data' : 'using cached WURFL.js data');
+
+    const wjsDevice = WurflJSDevice.fromCache(cachedWurflData);
+    if (!wjsDevice._isOverQuota()) {
+      enrichDeviceFPD(reqBidsConfigObj, wjsDevice.FPD());
+      enrichmentType = ENRICHMENT_TYPE.WURFL_PUB;
+    }
+    enrichDeviceBidder(reqBidsConfigObj, bidders, wjsDevice);
+
+    // Store WURFL ID for analytics
+    wurflId = cachedWurflData.WURFL?.wurfl_id || '';
+
+    // Store sampling rate for beacon
+    samplingRate = cachedWurflData.wurfl_pbjs?.sampling_rate ?? DEFAULT_SAMPLING_RATE;
+
+    // If expired, refresh cache async
+    if (isExpired) {
+      loadWurflJsAsync(config, bidders);
+    }
+
+    WurflDebugger.moduleExecutionStop();
+    callback();
+    return;
+  }
+
+  // Priority 2: return LCE data
+  logger.logMessage('generating fresh LCE data');
+  WurflDebugger.setDataSource('lce');
+  WurflDebugger.lceDetectionStart();
+  const fpdDevice = WurflLCEDevice.FPD();
+  WurflDebugger.lceDetectionStop();
+  WurflDebugger.setLceData(fpdDevice);
+  enrichDeviceFPD(reqBidsConfigObj, fpdDevice);
+
+  // Set enrichment type to LCE
+  enrichmentType = ENRICHMENT_TYPE.LCE;
+  bidders.forEach(bidder => bidderEnrichment.set(bidder, ENRICHMENT_TYPE.LCE));
+
+  // Set default sampling rate for LCE
+  samplingRate = DEFAULT_SAMPLING_RATE;
+
+  // Load WURFL.js async for future requests
+  loadWurflJsAsync(config, bidders);
+
+  WurflDebugger.moduleExecutionStop();
+  callback();
+}
+
+/**
+ * onAuctionEndEvent is called when the auction ends
+ * @param {Object} auctionDetails Auction details
+ * @param {Object} config Configuration for WURFL RTD submodule
+ * @param {Object} userConsent User consent data
+ */
+function onAuctionEndEvent(auctionDetails, config, userConsent) {
+  // Apply sampling
+  if (!shouldSample(samplingRate)) {
+    logger.logMessage(`beacon skipped due to sampling (rate: ${samplingRate}%)`);
+    return;
+  }
+
+  const statsHost = config.params?.statsHost ?? null;
+
+  let host = STATS_HOST;
+  if (statsHost) {
+    host = statsHost;
+  }
+
+  const url = new URL(host);
+  url.pathname = STATS_ENDPOINT_PATH;
+
+  // Only send beacon if there are bids to report
+  if (!auctionDetails.bidsReceived || auctionDetails.bidsReceived.length === 0) {
+    return;
+  }
+
+  logger.logMessage(`onAuctionEndEvent: processing ${auctionDetails.bidsReceived.length} bid responses`);
+
+  // Build a lookup object for winning bid request IDs
+  const winningBids = getGlobal().getHighestCpmBids() || [];
+  const winningBidIds = {};
+  for (let i = 0; i < winningBids.length; i++) {
+    const bid = winningBids[i];
+    winningBidIds[bid.requestId] = true;
+  }
+
+  logger.logMessage(`onAuctionEndEvent: ${winningBids.length} winning bids identified`);
+
+  // Build a lookup object for bid responses: "adUnitCode:bidderCode" -> bid
+  const bidResponseMap = {};
+  for (let i = 0; i < auctionDetails.bidsReceived.length; i++) {
+    const bid = auctionDetails.bidsReceived[i];
+    const adUnitCode = bid.adUnitCode;
+    const bidderCode = bid.bidderCode || bid.bidder;
+    const key = adUnitCode + ':' + bidderCode;
+    bidResponseMap[key] = bid;
+  }
+
+  // Build ad units array with all bidders (including non-responders)
+  const adUnits = [];
+
+  if (auctionDetails.adUnits) {
+    for (let i = 0; i < auctionDetails.adUnits.length; i++) {
+      const adUnit = auctionDetails.adUnits[i];
+      const adUnitCode = adUnit.code;
+      const bidders = [];
+
+      // Check each bidder configured for this ad unit
+      for (let j = 0; j < adUnit.bids.length; j++) {
+        const bidConfig = adUnit.bids[j];
+        const bidderCode = bidConfig.bidder;
+        const key = adUnitCode + ':' + bidderCode;
+        const bidResponse = bidResponseMap[key];
+
+        if (bidResponse) {
+          // Bidder responded - include full data
+          const isWinner = winningBidIds[bidResponse.requestId] === true;
+          bidders.push({
+            bidder: bidderCode,
+            enrichment: bidderEnrichment.get(bidderCode),
+            cpm: bidResponse.cpm,
+            currency: bidResponse.currency,
+            won: isWinner
+          });
+        } else {
+          // Bidder didn't respond - include without cpm/currency
+          bidders.push({
+            bidder: bidderCode,
+            enrichment: bidderEnrichment.get(bidderCode),
+            won: false
+          });
+        }
+      }
+
+      adUnits.push({
+        ad_unit_code: adUnitCode,
+        bidders: bidders
+      });
+    }
+  }
+
+  // Count bidders for logging
+  let totalBidderEntries = 0;
+  for (let i = 0; i < adUnits.length; i++) {
+    totalBidderEntries += adUnits[i].bidders.length;
+  }
+  const respondedBidders = auctionDetails.bidsReceived.length;
+  const nonRespondingBidders = totalBidderEntries - respondedBidders;
+
+  logger.logMessage(`onAuctionEndEvent: built ${adUnits.length} ad units with ${totalBidderEntries} total bidder entries (${respondedBidders} responded, ${nonRespondingBidders} non-responding)`);
+
+  // Calculate consent class
+  const consentClass = getConsentClass(userConsent);
+
+  // Build complete payload
+  const payloadData = {
+    version: MODULE_VERSION,
+    domain: typeof window !== 'undefined' ? window.location.hostname : '',
+    path: typeof window !== 'undefined' ? window.location.pathname : '',
+    sampling_rate: samplingRate,
+    enrichment: enrichmentType,
+    wurfl_id: wurflId,
+    consent_class: consentClass,
+    ad_units: adUnits
+  };
+
+  // Add A/B test fields if enabled
+  if (abTest) {
+    payloadData.ab_name = abTest.ab_name;
+    payloadData.ab_variant = abTest.ab_variant;
+  }
+
+  const payload = JSON.stringify(payloadData);
+
+  const sentBeacon = sendBeacon(url.toString(), payload);
+  if (sentBeacon) {
+    WurflDebugger.setBeaconPayload(JSON.parse(payload));
+    return;
+  }
+
+  fetch(url.toString(), {
+    method: 'POST',
+    body: payload,
+    mode: 'no-cors',
+    keepalive: true
+  });
+
+  WurflDebugger.setBeaconPayload(JSON.parse(payload));
+}
+
+// ==================== MODULE EXPORT ====================
+
+// The WURFL submodule
+export const wurflSubmodule = {
+  name: MODULE_NAME,
+  init,
+  getBidRequestData,
+  onAuctionEndEvent,
+}
+
+// Register the WURFL submodule as submodule of realTimeData
+submodule(REAL_TIME_MODULE, wurflSubmodule);

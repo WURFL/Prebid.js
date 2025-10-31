@@ -12,7 +12,7 @@ import { getGlobal } from '../src/prebidGlobal.js';
 // Constants
 const REAL_TIME_MODULE = 'realTimeData';
 const MODULE_NAME = 'wurfl';
-const MODULE_VERSION = '2.0.0-beta4';
+const MODULE_VERSION = '2.0.0-beta5';
 
 // WURFL_JS_HOST is the host for the WURFL service endpoints
 const WURFL_JS_HOST = 'https://prebid.wurflcloud.com';
@@ -164,6 +164,20 @@ function enrichDeviceFPD(reqBidsConfigObj, deviceData) {
 
   // Use mergeDeep to properly merge into global device
   mergeDeep(reqBidsConfigObj.ortb2Fragments.global, { device: enrichedDevice });
+}
+
+/**
+ * enrichDeviceExt enriches the global device.ext.wurfl object with extension data
+ * @param {Object} reqBidsConfigObj Bid request configuration object
+ * @param {Object} extData Extension data in format { device: { ext: { wurfl: {...} } } }
+ */
+function enrichDeviceExt(reqBidsConfigObj, extData) {
+  if (!extData || !reqBidsConfigObj?.ortb2Fragments?.global) {
+    return;
+  }
+
+  // Use mergeDeep to properly merge ext.wurfl data into global device
+  mergeDeep(reqBidsConfigObj.ortb2Fragments.global, extData);
 }
 
 /**
@@ -521,8 +535,11 @@ const WurflDebugger = {
     window.WurflRtdDebug.data.pbjsData = pbjsData;
   },
 
-  setLceData(lceDevice) {
-    window.WurflRtdDebug.data.lceDevice = lceDevice;
+  setLceData(lceDevice, extWurfl) {
+    window.WurflRtdDebug.data.lceDevice = {
+      ...lceDevice,
+      ext: extWurfl?.device?.ext
+    };
   },
 
   setCacheExpired(expired) {
@@ -905,29 +922,20 @@ const WurflLCEDevice = {
     return { deviceType: "", osName: "", osVersion: "" };
   },
 
-  _getDevicePixelRatioValue(win = (typeof window !== "undefined" ? window : undefined)) {
-    if (!win) {
-      return 1;
-    }
+  _getDevicePixelRatioValue() {
     return (
-      win.devicePixelRatio ||
-      (win.screen.deviceXDPI / win.screen.logicalXDPI) ||
-      Math.round(win.screen.availWidth / win.document.documentElement.clientWidth)
+      window.devicePixelRatio ||
+      (screen.deviceXDPI / screen.logicalXDPI) ||
+      Math.round(screen.availWidth / document.documentElement.clientWidth)
     );
   },
 
-  _getScreenWidth(win = (typeof window !== "undefined" ? window : undefined)) {
-    if (!win) {
-      return 0;
-    }
-    return Math.round(win.screen.width * this._getDevicePixelRatioValue(win));
+  _getScreenWidth() {
+    return Math.round(screen.width * this._getDevicePixelRatioValue());
   },
 
-  _getScreenHeight(win = (typeof window !== "undefined" ? window : undefined)) {
-    if (!win) {
-      return 0;
-    }
-    return Math.round(win.screen.height * this._getDevicePixelRatioValue(win));
+  _getScreenHeight() {
+    return Math.round(screen.height * this._getDevicePixelRatioValue());
   },
 
   _getMake(ua) {
@@ -948,18 +956,26 @@ const WurflLCEDevice = {
     return '';
   },
 
+  _isRobot(useragent) {
+    const botTokens = ['+http', 'Googlebot', 'BingPreview', 'Yahoo! Slurp'];
+    for (const botToken of botTokens) {
+      if (useragent.includes(botToken)) {
+        return true;
+      }
+    }
+    return false;
+  },
+
   // Public API - returns device object for First Party Data (global)
   FPD() {
-    const useragent = typeof window !== "undefined" ? window.navigator.userAgent : "";
-    const deviceInfo = this._getDeviceInfo(useragent);
+    const deviceInfo = this._getDeviceInfo(navigator.userAgent);
 
-    const win = typeof window !== "undefined" ? window : undefined;
-    const pixelRatio = this._getDevicePixelRatioValue(win);
-    const screenWidth = this._getScreenWidth(win);
-    const screenHeight = this._getScreenHeight(win);
+    const pixelRatio = this._getDevicePixelRatioValue();
+    const screenWidth = this._getScreenWidth();
+    const screenHeight = this._getScreenHeight();
 
-    const brand = this._getMake(useragent);
-    const model = this._getModel(useragent);
+    const brand = this._getMake(navigator.userAgent);
+    const model = this._getModel(navigator.userAgent);
 
     return {
       devicetype: deviceInfo.deviceType,
@@ -972,6 +988,20 @@ const WurflLCEDevice = {
       w: screenWidth,
       pxratio: pixelRatio,
       js: 1
+    };
+  },
+
+  // Public API - returns device.ext.wurfl object with LCE-detected capabilities
+  // Returns: { device: { ext: { wurfl: { is_robot: boolean } } } }
+  Ext() {
+    return {
+      device: {
+        ext: {
+          wurfl: {
+            is_robot: this._isRobot(navigator.userAgent)
+          }
+        }
+      }
     };
   }
 };
@@ -1081,9 +1111,11 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
   WurflDebugger.setDataSource('lce');
   WurflDebugger.lceDetectionStart();
   const fpdDevice = WurflLCEDevice.FPD();
+  const extWurfl = WurflLCEDevice.Ext();
   WurflDebugger.lceDetectionStop();
-  WurflDebugger.setLceData(fpdDevice);
+  WurflDebugger.setLceData(fpdDevice, extWurfl);
   enrichDeviceFPD(reqBidsConfigObj, fpdDevice);
+  enrichDeviceExt(reqBidsConfigObj, extWurfl);
 
   // Set enrichment type to LCE
   enrichmentType = ENRICHMENT_TYPE.LCE;

@@ -12,7 +12,7 @@ import { getGlobal } from '../src/prebidGlobal.js';
 // Constants
 const REAL_TIME_MODULE = 'realTimeData';
 const MODULE_NAME = 'wurfl';
-const MODULE_VERSION = '2.0.0-beta6';
+const MODULE_VERSION = '2.0.3';
 
 // WURFL_JS_HOST is the host for the WURFL service endpoints
 const WURFL_JS_HOST = 'https://prebid.wurflcloud.com';
@@ -47,8 +47,10 @@ const ORTB2_DEVICE_FIELDS = [
 
 // Enrichment type constants
 const ENRICHMENT_TYPE = {
+  UNKNOWN: 'unknown',
   NONE: 'none',
   LCE: 'lce',
+  LCE_ERROR: 'lcefailed',
   WURFL_PUB: 'wurfl_pub',
   WURFL_SSP: 'wurfl_ssp',
   WURFL_PUB_SSP: 'wurfl_pub_ssp'
@@ -190,6 +192,11 @@ function enrichDeviceExt(reqBidsConfigObj, extData) {
  * @param {WurflJSDevice} wjsDevice WURFL.js device data with permissions and caps
  */
 function enrichDeviceBidder(reqBidsConfigObj, bidders, wjsDevice) {
+  // Initialize bidder fragments if not present
+  if (!reqBidsConfigObj.ortb2Fragments.bidder) {
+    reqBidsConfigObj.ortb2Fragments.bidder = {};
+  }
+
   bidders.forEach((bidderCode) => {
     // Get bidder data (handles both authorized and unauthorized bidders)
     const bidderDevice = wjsDevice.Bidder(bidderCode);
@@ -207,7 +214,9 @@ function enrichDeviceBidder(reqBidsConfigObj, bidders, wjsDevice) {
     }
 
     // Inject WURFL data
-    mergeDeep(reqBidsConfigObj.ortb2Fragments.bidder, { [bidderCode]: bidderDevice });
+    const bd = reqBidsConfigObj.ortb2Fragments.bidder[bidderCode] || {};
+    mergeDeep(bd, bidderDevice);
+    reqBidsConfigObj.ortb2Fragments.bidder[bidderCode] = bd;
   });
 }
 
@@ -941,12 +950,12 @@ const WurflLCEDevice = {
     );
   },
 
-  _getScreenWidth() {
-    return Math.round(screen.width * this._getDevicePixelRatioValue());
+  _getScreenWidth(pixelRatio) {
+    return Math.round(screen.width * pixelRatio);
   },
 
-  _getScreenHeight() {
-    return Math.round(screen.height * this._getDevicePixelRatioValue());
+  _getScreenHeight(pixelRatio) {
+    return Math.round(screen.height * pixelRatio);
   },
 
   _getMake(ua) {
@@ -977,39 +986,89 @@ const WurflLCEDevice = {
     return false;
   },
 
+  _getUserAgent() {
+    return window.navigator?.userAgent || '';
+  },
+
   // Public API - returns device object for First Party Data (global)
   FPD() {
-    const deviceInfo = this._getDeviceInfo(navigator.userAgent);
+    // Early exit - check window exists
+    if (typeof window === 'undefined') {
+      return { js: 1 };
+    }
 
-    const pixelRatio = this._getDevicePixelRatioValue();
-    const screenWidth = this._getScreenWidth();
-    const screenHeight = this._getScreenHeight();
+    // Check what globals are available upfront
+    const hasScreen = !!window.screen;
 
-    const brand = this._getMake(navigator.userAgent);
-    const model = this._getModel(navigator.userAgent);
+    const device = { js: 1 };
+    const useragent = this._getUserAgent();
 
-    return {
-      devicetype: deviceInfo.deviceType,
-      make: brand,
-      model: model,
-      os: deviceInfo.osName,
-      osv: deviceInfo.osVersion,
-      hwv: model,
-      h: screenHeight,
-      w: screenWidth,
-      pxratio: pixelRatio,
-      js: 1
-    };
+    // Only process UA-dependent properties if we have a UA
+    if (useragent) {
+      // Get device info
+      const deviceInfo = this._getDeviceInfo(useragent);
+      if (deviceInfo.deviceType !== undefined) {
+        device.devicetype = deviceInfo.deviceType;
+      }
+      if (deviceInfo.osName !== undefined) {
+        device.os = deviceInfo.osName;
+      }
+      if (deviceInfo.osVersion !== undefined) {
+        device.osv = deviceInfo.osVersion;
+      }
+
+      // Make/model
+      const make = this._getMake(useragent);
+      if (make !== undefined) {
+        device.make = make;
+      }
+
+      const model = this._getModel(useragent);
+      if (model !== undefined) {
+        device.model = model;
+        device.hwv = model;
+      }
+    }
+
+    // Screen-dependent properties (independent of UA)
+    if (hasScreen) {
+      const pixelRatio = this._getDevicePixelRatioValue();
+      if (pixelRatio !== undefined) {
+        device.pxratio = pixelRatio;
+
+        const width = this._getScreenWidth(pixelRatio);
+        if (width !== undefined) {
+          device.w = width;
+        }
+
+        const height = this._getScreenHeight(pixelRatio);
+        if (height !== undefined) {
+          device.h = height;
+        }
+      }
+    }
+
+    return device;
   },
 
   // Public API - returns device.ext.wurfl object with LCE-detected capabilities
   // Returns: { device: { ext: { wurfl: { is_robot: boolean } } } }
   Ext() {
+    // Early exit - check window exists
+    if (typeof window === 'undefined') {
+      return { device: { ext: { wurfl: {} } } };
+    }
+
+    const useragent = this._getUserAgent();
+    if (!useragent) {
+      return { device: { ext: { wurfl: {} } } };
+    }
+
     return {
       device: {
         ext: {
           wurfl: {
-            is_robot: this._isRobot(navigator.userAgent)
+            is_robot: this._isRobot(useragent)
           }
         }
       }
@@ -1125,16 +1184,27 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
   logger.logMessage('generating fresh LCE data');
   WurflDebugger.setDataSource('lce');
   WurflDebugger.lceDetectionStart();
-  const fpdDevice = WurflLCEDevice.FPD();
-  const extWurfl = WurflLCEDevice.Ext();
+
+  let lceDevice;
+  let extWurfl;
+  try {
+    lceDevice = WurflLCEDevice.FPD();
+    extWurfl = WurflLCEDevice.Ext();
+    enrichmentType = ENRICHMENT_TYPE.LCE;
+  } catch (e) {
+    logger.logError('Error generating LCE device data:', e);
+    lceDevice = { js: 1 };
+    extWurfl = { device: { ext: { wurfl: {} } } };
+    enrichmentType = ENRICHMENT_TYPE.LCE_ERROR;
+  }
+
   WurflDebugger.lceDetectionStop();
-  WurflDebugger.setLceData(fpdDevice, extWurfl);
-  enrichDeviceFPD(reqBidsConfigObj, fpdDevice);
+  WurflDebugger.setLceData(lceDevice, extWurfl);
+  enrichDeviceFPD(reqBidsConfigObj, lceDevice);
   enrichDeviceExt(reqBidsConfigObj, extWurfl);
 
-  // Set enrichment type to LCE
-  enrichmentType = ENRICHMENT_TYPE.LCE;
-  bidders.forEach(bidder => bidderEnrichment.set(bidder, ENRICHMENT_TYPE.LCE));
+  // Set enrichment type for all bidders
+  bidders.forEach(bidder => bidderEnrichment.set(bidder, enrichmentType));
 
   // Set default sampling rate for LCE
   samplingRate = DEFAULT_SAMPLING_RATE;

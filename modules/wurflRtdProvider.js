@@ -260,7 +260,7 @@ function loadWurflJsAsync(config, bidders) {
   // Helper function to load WURFL.js script
   const loadWurflJs = (scriptUrl) => {
     try {
-      loadExternalScript(scriptUrl, MODULE_TYPE_RTD, MODULE_NAME, () => {
+      loadExternalScript(scriptUrl, MODULE_NAME, () => {
         logger.logMessage('async WURFL.js script injected');
         window.WURFLPromises.complete.then((res) => {
           logger.logMessage('async WURFL.js data received', res);

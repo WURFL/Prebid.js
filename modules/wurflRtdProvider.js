@@ -209,6 +209,7 @@ function enrichDeviceBidder(reqBidsConfigObj, bidders, wjsDevice) {
 
     // Skip if no data to inject (over quota + unauthorized)
     if (Object.keys(bidderDevice).length === 0) {
+      bidderEnrichment.set(bidderCode, ENRICHMENT_TYPE.NONE);
       return;
     }
 
@@ -1097,7 +1098,7 @@ const init = (config, userConsent) => {
 
   // Initialize module state
   bidderEnrichment = new Map();
-  enrichmentType = ENRICHMENT_TYPE.NONE;
+  enrichmentType = ENRICHMENT_TYPE.UNKNOWN;
   wurflId = '';
   samplingRate = DEFAULT_SAMPLING_RATE;
   tier = '';
@@ -1134,7 +1135,7 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
   reqBidsConfigObj.adUnits.forEach(adUnit => {
     adUnit.bids.forEach(bid => {
       bidders.add(bid.bidder);
-      bidderEnrichment.set(bid.bidder, ENRICHMENT_TYPE.NONE);
+      bidderEnrichment.set(bid.bidder, ENRICHMENT_TYPE.UNKNOWN);
     });
   });
 
@@ -1142,6 +1143,7 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
   if (abTest && abTest.ab_variant === AB_TEST.CONTROL_GROUP) {
     logger.logMessage('A/B test control group: skipping enrichment');
     enrichmentType = ENRICHMENT_TYPE.NONE;
+    bidders.forEach(bidder => bidderEnrichment.set(bidder, ENRICHMENT_TYPE.NONE));
     WurflDebugger.moduleExecutionStop();
     callback();
     return;
@@ -1165,6 +1167,8 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
     if (!wjsDevice._isOverQuota()) {
       enrichDeviceFPD(reqBidsConfigObj, wjsDevice.FPD());
       enrichmentType = ENRICHMENT_TYPE.WURFL_PUB;
+    } else {
+      enrichmentType = ENRICHMENT_TYPE.NONE;
     }
     enrichDeviceBidder(reqBidsConfigObj, bidders, wjsDevice);
 

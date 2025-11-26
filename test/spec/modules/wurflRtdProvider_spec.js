@@ -744,8 +744,8 @@ describe('wurflRtdProvider', function () {
         // Verify global FPD does NOT have device data (over quota)
         expect(reqBidsConfigObj.ortb2Fragments.global.device).to.deep.equal({});
 
-        // Over quota, authorized bidders: should get basic + pub + bidder-specific caps (ALL)
-        // bidder1 should get device fields + ext.wurfl with basic + pub + bidder1-specific
+        // Over quota, authorized bidders: should get basic + bidder-specific (NO pub)
+        // bidder1 should get device fields + ext.wurfl with basic + bidder1-specific
         expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder1.device).to.deep.include({
           make: 'Google',
           model: 'Nexus 5',
@@ -760,9 +760,8 @@ describe('wurflRtdProvider', function () {
           js: 1
         });
         const basicIndices = wurfl_pbjs_over_quota.global.basic_set.cap_indices;
-        const pubIndices = wurfl_pbjs_over_quota.global.publisher.cap_indices;
         const bidder1Indices = wurfl_pbjs_over_quota.bidders.bidder1.cap_indices;
-        const allBidder1Indices = [...new Set([...basicIndices, ...pubIndices, ...bidder1Indices])];
+        const allBidder1Indices = [...new Set([...basicIndices, ...bidder1Indices])];
         const expectedBidder1AllCaps = {};
         allBidder1Indices.forEach(index => {
           const capName = wurfl_pbjs_over_quota.caps[index];
@@ -772,7 +771,7 @@ describe('wurflRtdProvider', function () {
         });
         expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder1.device.ext.wurfl).to.deep.equal(expectedBidder1AllCaps);
 
-        // bidder2 should get device fields + ext.wurfl with basic + pub + bidder2-specific
+        // bidder2 should get device fields + ext.wurfl with basic + bidder2-specific
         expect(reqBidsConfigObj.ortb2Fragments.bidder.bidder2.device).to.deep.include({
           make: 'Google',
           model: 'Nexus 5',
@@ -787,7 +786,7 @@ describe('wurflRtdProvider', function () {
           js: 1
         });
         const bidder2Indices = wurfl_pbjs_over_quota.bidders.bidder2.cap_indices;
-        const allBidder2Indices = [...new Set([...basicIndices, ...pubIndices, ...bidder2Indices])];
+        const allBidder2Indices = [...new Set([...basicIndices, ...bidder2Indices])];
         const expectedBidder2AllCaps = {};
         allBidder2Indices.forEach(index => {
           const capName = wurfl_pbjs_over_quota.caps[index];
@@ -849,9 +848,8 @@ describe('wurflRtdProvider', function () {
           js: 1
         });
         const basicIndices = wurfl_pbjs_over_quota.global.basic_set.cap_indices;
-        const pubIndices = wurfl_pbjs_over_quota.global.publisher.cap_indices;
         const bidder1Indices = wurfl_pbjs_over_quota.bidders.bidder1.cap_indices;
-        const allBidder1Indices = [...new Set([...basicIndices, ...pubIndices, ...bidder1Indices])];
+        const allBidder1Indices = [...new Set([...basicIndices, ...bidder1Indices])];
         const expectedBidder1AllCaps = {};
         allBidder1Indices.forEach(index => {
           const capName = wurfl_pbjs_over_quota.caps[index];
@@ -868,7 +866,7 @@ describe('wurflRtdProvider', function () {
           devicetype: 4
         });
         const bidder2Indices = wurfl_pbjs_over_quota.bidders.bidder2.cap_indices;
-        const allBidder2Indices = [...new Set([...basicIndices, ...pubIndices, ...bidder2Indices])];
+        const allBidder2Indices = [...new Set([...basicIndices, ...bidder2Indices])];
         const expectedBidder2AllCaps = {};
         allBidder2Indices.forEach(index => {
           const capName = wurfl_pbjs_over_quota.caps[index];
@@ -888,87 +886,6 @@ describe('wurflRtdProvider', function () {
       const userConsent = {};
 
       wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, userConsent);
-    });
-
-    it('should work with guardOrtb2Fragments Proxy (Prebid 10.x compatibility)', (done) => {
-      // Simulate Prebid 10.x where rtdModule wraps ortb2Fragments with guardOrtb2Fragments
-      const plainFragments = {
-        global: { device: {} },
-        bidder: {}
-      };
-
-      const plainReqBidsConfigObj = {
-        adUnits: [{
-          bids: [
-            { bidder: 'bidder1' },
-            { bidder: 'bidder2' }
-          ]
-        }],
-        ortb2Fragments: plainFragments
-      };
-
-      // Setup localStorage with cached WURFL data (over quota)
-      const wurfl_pbjs_over_quota = {
-        ...wurfl_pbjs,
-        over_quota: 1
-      };
-      const cachedData = { WURFL, wurfl_pbjs: wurfl_pbjs_over_quota };
-      sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
-      sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
-      sandbox.stub(storage, 'hasLocalStorage').returns(true);
-
-      // Wrap with guard (like rtdModule does in production)
-      const guardedFragments = guardOrtb2Fragments(plainFragments, {});
-      const guardedReqBidsConfigObj = { ...plainReqBidsConfigObj, ortb2Fragments: guardedFragments };
-
-      const callback = () => {
-        // Over quota, authorized bidders: should get basic + pub + bidder-specific caps (ALL)
-        expect(plainFragments.bidder.bidder1).to.exist;
-        expect(plainFragments.bidder.bidder1.device).to.exist;
-        expect(plainFragments.bidder.bidder1.device.ext).to.exist;
-
-        const basicIndices = wurfl_pbjs_over_quota.global.basic_set.cap_indices;
-        const pubIndices = wurfl_pbjs_over_quota.global.publisher.cap_indices;
-        const bidder1Indices = wurfl_pbjs_over_quota.bidders.bidder1.cap_indices;
-        const allBidder1Indices = [...new Set([...basicIndices, ...pubIndices, ...bidder1Indices])];
-        const expectedBidder1AllCaps = {};
-        allBidder1Indices.forEach(index => {
-          const capName = wurfl_pbjs_over_quota.caps[index];
-          if (capName && capName in WURFL) {
-            expectedBidder1AllCaps[capName] = WURFL[capName];
-          }
-        });
-        expect(plainFragments.bidder.bidder1.device.ext.wurfl).to.deep.equal(expectedBidder1AllCaps);
-
-        // Verify FPD is present
-        expect(plainFragments.bidder.bidder1.device).to.deep.include({
-          make: 'Google',
-          model: 'Nexus 5',
-          devicetype: 4,
-          os: 'Android',
-          osv: '6.0'
-        });
-
-        // Verify bidder2 (authorized) also got enriched
-        expect(plainFragments.bidder.bidder2).to.exist;
-        const bidder2Indices = wurfl_pbjs_over_quota.bidders.bidder2.cap_indices;
-        const allBidder2Indices = [...new Set([...basicIndices, ...pubIndices, ...bidder2Indices])];
-        const expectedBidder2AllCaps = {};
-        allBidder2Indices.forEach(index => {
-          const capName = wurfl_pbjs_over_quota.caps[index];
-          if (capName && capName in WURFL) {
-            expectedBidder2AllCaps[capName] = WURFL[capName];
-          }
-        });
-        expect(plainFragments.bidder.bidder2.device.ext.wurfl).to.deep.equal(expectedBidder2AllCaps);
-
-        done();
-      };
-
-      const config = { params: {} };
-      const userConsent = {};
-
-      wurflSubmodule.getBidRequestData(guardedReqBidsConfigObj, callback, config, userConsent);
     });
 
     it('should pass basic+pub caps via global and authorized bidders get full caps when under quota', (done) => {

@@ -371,7 +371,7 @@ describe('wurflRtdProvider', function () {
 
       it('should skip enrichment for control group in getBidRequestData', (done) => {
         sandbox.stub(Math, 'random').returns(0.75); // Control group
-        const config = { params: { abTest: true, abName: 'test_sept', abSplit: 0.5 } };
+        const config = { params: { abTest: true, abName: 'test_sept', abSplit: 0.5, abExcludeLCE: false } };
 
         // Initialize with A/B test config
         wurflSubmodule.init(config);
@@ -391,7 +391,7 @@ describe('wurflRtdProvider', function () {
 
       it('should send beacon with ab_name and ab_variant for treatment group', (done) => {
         sandbox.stub(Math, 'random').returns(0.25); // Treatment group
-        const config = { params: { abTest: true, abName: 'test_sept', abSplit: 0.5 } };
+        const config = { params: { abTest: true, abName: 'test_sept', abSplit: 0.5, abExcludeLCE: false } };
 
         // Initialize with A/B test config
         wurflSubmodule.init(config);
@@ -438,7 +438,7 @@ describe('wurflRtdProvider', function () {
 
       it('should send beacon with ab_name and ab_variant for control group', (done) => {
         sandbox.stub(Math, 'random').returns(0.75); // Control group
-        const config = { params: { abTest: true, abName: 'test_sept', abSplit: 0.5 } };
+        const config = { params: { abTest: true, abName: 'test_sept', abSplit: 0.5, abExcludeLCE: false } };
 
         // Initialize with A/B test config
         wurflSubmodule.init(config);
@@ -473,6 +473,75 @@ describe('wurflRtdProvider', function () {
           expect(payload).to.have.property('ab_name', 'test_sept');
           expect(payload).to.have.property('ab_variant', 'control');
           expect(payload).to.have.property('enrichment', 'none');
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, {});
+      });
+
+      it('should enrich for control group when exclude_lce is true (default)', (done) => {
+        sandbox.stub(Math, 'random').returns(0.75); // Control group
+        const config = { params: { abTest: true, abName: 'test_sept', abSplit: 0.5 } }; // exclude_lce defaults to true
+
+        // Initialize with A/B test config
+        wurflSubmodule.init(config);
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          // Control group SHOULD enrich when exclude_lce is true
+          expect(reqBidsConfigObj.ortb2Fragments.global.device).to.not.deep.equal({});
+          expect(reqBidsConfigObj.ortb2Fragments.global.device).to.have.property('js', 1);
+          done();
+        };
+
+        wurflSubmodule.getBidRequestData(reqBidsConfigObj, callback, config, {});
+      });
+
+      it('should NOT send ab_name and ab_variant in beacon when exclude_lce is true', (done) => {
+        sandbox.stub(Math, 'random').returns(0.25); // Treatment group
+        const config = { params: { abTest: true, abName: 'test_sept', abSplit: 0.5 } }; // exclude_lce defaults to true
+
+        // Initialize with A/B test config
+        wurflSubmodule.init(config);
+
+        const cachedData = { WURFL, wurfl_pbjs };
+        sandbox.stub(storage, 'getDataFromLocalStorage').returns(JSON.stringify(cachedData));
+        sandbox.stub(storage, 'localStorageIsEnabled').returns(true);
+        sandbox.stub(storage, 'hasLocalStorage').returns(true);
+
+        const sendBeaconStub = sandbox.stub(ajaxModule, 'sendBeacon').returns(true);
+
+        sandbox.stub(prebidGlobalModule, 'getGlobal').returns({
+          getHighestCpmBids: () => []
+        });
+
+        reqBidsConfigObj.ortb2Fragments.global.device = {};
+        reqBidsConfigObj.ortb2Fragments.bidder = {};
+
+        const callback = () => {
+          const auctionDetails = {
+            bidsReceived: [
+              { requestId: 'req1', bidderCode: 'bidder1', adUnitCode: 'ad1', cpm: 1.5, currency: 'USD' }
+            ],
+            adUnits: [
+              {
+                code: 'ad1',
+                bids: [{ bidder: 'bidder1' }]
+              }
+            ]
+          };
+
+          wurflSubmodule.onAuctionEndEvent(auctionDetails, config, null);
+
+          expect(sendBeaconStub.calledOnce).to.be.true;
+          const beaconCall = sendBeaconStub.getCall(0);
+          const payload = JSON.parse(beaconCall.args[1]);
+          // Should NOT have ab_name and ab_variant when exclude_lce is true
+          expect(payload).to.not.have.property('ab_name');
+          expect(payload).to.not.have.property('ab_variant');
+          expect(payload).to.have.property('enrichment', 'wurfl_pub');
           done();
         };
 

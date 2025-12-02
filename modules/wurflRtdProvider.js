@@ -13,7 +13,7 @@ import { getGlobal } from '../src/prebidGlobal.js';
 // Constants
 const REAL_TIME_MODULE = 'realTimeData';
 const MODULE_NAME = 'wurfl';
-const MODULE_VERSION = '2.1.1';
+const MODULE_VERSION = '2.2.0';
 
 // WURFL_JS_HOST is the host for the WURFL service endpoints
 const WURFL_JS_HOST = 'https://prebid.wurflcloud.com';
@@ -1091,14 +1091,15 @@ const init = (config, userConsent) => {
   if (abTestEnabled) {
     const abName = config?.params?.abName ?? AB_TEST.DEFAULT_NAME;
     const abSplit = config?.params?.abSplit ?? AB_TEST.DEFAULT_SPLIT;
+    const abExcludeLCE = config?.params?.abExcludeLCE ?? true;
     const abVariant = getABVariant(abSplit);
-    abTest = { ab_name: abName, ab_variant: abVariant };
-    logger.logMessage(`A/B test "${abName}": user in ${abVariant} group`);
+    abTest = { ab_name: abName, ab_variant: abVariant, exclude_lce: abExcludeLCE };
+    logger.logMessage(`A/B test "${abName}": user in ${abVariant} group (exclude_lce: ${abExcludeLCE})`);
   }
 
   logger.logMessage('initialized', {
     version: MODULE_VERSION,
-    abTest: abTest ? `${abTest.ab_name}:${abTest.ab_variant}` : 'disabled'
+    abTest: abTest ? `${abTest.ab_name}:${abTest.ab_variant}:exclude_lce=${abTest.exclude_lce}` : 'disabled'
   });
   return true;
 }
@@ -1123,8 +1124,8 @@ const getBidRequestData = (reqBidsConfigObj, callback, config, userConsent) => {
     });
   });
 
-  // A/B test: Skip enrichment for control group but allow beacon sending
-  if (abTest && abTest.ab_variant === AB_TEST.CONTROL_GROUP) {
+  // A/B test: Skip enrichment for control group (unless exclude_lce is true)
+  if (abTest && abTest.ab_variant === AB_TEST.CONTROL_GROUP && !abTest.exclude_lce) {
     logger.logMessage('A/B test control group: skipping enrichment');
     enrichmentType = ENRICHMENT_TYPE.NONE;
     bidders.forEach(bidder => bidderEnrichment.set(bidder, ENRICHMENT_TYPE.NONE));
@@ -1350,8 +1351,8 @@ function onAuctionEndEvent(auctionDetails, config, userConsent) {
     ad_units: adUnits
   };
 
-  // Add A/B test fields if enabled
-  if (abTest) {
+  // Add A/B test fields if enabled (exclude if exclude_lce is true)
+  if (abTest && !abTest.exclude_lce) {
     payloadData.ab_name = abTest.ab_name;
     payloadData.ab_variant = abTest.ab_variant;
   }

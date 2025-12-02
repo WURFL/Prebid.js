@@ -47,15 +47,16 @@ pbjs.setConfig({
 
 ### Parameters
 
-| Name           | Type    | Description                                                      | Default        |
-| :------------- | :------ | :--------------------------------------------------------------- | :------------- |
-| name           | String  | Real time data module name                                       | Always 'wurfl' |
-| waitForIt      | Boolean | Should be `true` if there's an `auctionDelay` defined (optional) | `false`        |
-| params         | Object  |                                                                  |                |
-| params.altHost | String  | Alternate host to connect to WURFL.js                            |                |
-| params.abTest  | Boolean | Enable A/B testing mode                                          | `false`        |
-| params.abName  | String  | A/B test name identifier                                         | `'unknown'`    |
-| params.abSplit | Number  | Fraction of users in treatment group (0-1)                       | `0.5`          |
+| Name                | Type    | Description                                                      | Default        |
+| :------------------ | :------ | :--------------------------------------------------------------- | :------------- |
+| name                | String  | Real time data module name                                       | Always 'wurfl' |
+| waitForIt           | Boolean | Should be `true` if there's an `auctionDelay` defined (optional) | `false`        |
+| params              | Object  |                                                                  |                |
+| params.altHost      | String  | Alternate host to connect to WURFL.js                            |                |
+| params.abTest       | Boolean | Enable A/B testing mode                                          | `false`        |
+| params.abName       | String  | A/B test name identifier                                         | `'unknown'`    |
+| params.abSplit      | Number  | Fraction of users in treatment group (0-1)                       | `0.5`          |
+| params.abExcludeLCE | Boolean | Don't apply A/B testing to LCE bids                              | `true`         |
 
 ### A/B Testing
 
@@ -73,6 +74,7 @@ pbjs.setConfig({
           abTest: true,
           abName: "pub_test_sept23",
           abSplit: 0.5, // 50% treatment, 50% control
+          abExcludeLCE: true, // default - don't apply A/B testing to LCE bids
         },
       },
     ],
@@ -81,9 +83,9 @@ pbjs.setConfig({
 ```
 
 - **Treatment group** (`abSplit` \* 100%): Module enabled, bid requests enriched with WURFL device data
-- **Control group** ((1 - `abSplit`) \* 100%): Module disabled, no enrichment occurs
+- **Control group** ((1 - `abSplit`) \* 100%): Behavior depends on `abExcludeLCE` setting
 - Assignment is random on each page load based on `Math.random()`
-- Example: `abSplit: 0.75` means 75% get WURFL enrichment, 25% don't
+- Example: `abSplit: 0.75` means 75% get WURFL enrichment, 25% in control group
 
 ## Testing
 

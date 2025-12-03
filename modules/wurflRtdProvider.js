@@ -1102,15 +1102,22 @@ const ABTestManager = {
 
   /**
    * Sets the enrichment type encountered in current auction
-   * Disable A/B test if in LCE and abExcludeLCE is true
    * @param {string} enrichmentType 'lce' or 'wurfl'
    */
   setEnrichmentType(enrichmentType) {
     this._enrichmentType = enrichmentType;
-    // disable enrichment if in LCE and exclusion is set
+  },
+
+  /**
+   * Checks if A/B test is enabled for current auction
+   * @returns {boolean} True if A/B test should be applied
+   */
+  isEnabled() {
+    if (!this._enabled) return false;
     if (this._enrichmentType === AB_TEST.ENRICHMENT_TYPE_LCE && this._excludeLCE) {
-      this._enabled = false;
+      return false;
     }
+    return true;
   },
 
   /**
@@ -1118,42 +1125,18 @@ const ABTestManager = {
    * @returns {boolean} True if enrichment should be skipped
    */
   isInControlGroup() {
-    if (!this._enabled) {
+    if (!this.isEnabled()) {
       return false;
     }
     return (this._variant === AB_TEST.CONTROL_GROUP)
   },
 
   /**
-   * Checks if A/B test is enabled
-   * @returns {boolean}
-   */
-  isEnabled() {
-    return this._enabled;
-  },
-
-  /**
-   * Gets test name for beacon
-   * @returns {string|null}
-   */
-  getName() {
-    return this._name;
-  },
-
-  /**
-   * Gets variant for beacon
-   * @returns {string|null}
-   */
-  getVariant() {
-    return this._variant;
-  },
-
-  /**
-   * Gets beacon payload fields (returns null if disabled)
+   * Gets beacon payload fields (returns null if not active for auction)
    * @returns {Object|null}
    */
   getBeaconPayload() {
-    if (!this._enabled) {
+    if (!this.isEnabled()) {
       return null;
     }
 
